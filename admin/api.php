@@ -61,6 +61,40 @@ function player_exists(PDO $pdo, int $playerId): bool {
   return (bool) $stmt->fetchColumn();
 }
 
+function find_player_by_token(PDO $pdo, string $playerToken): ?array {
+  $stmt = $pdo->prepare('SELECT id, public_code, display_name FROM players WHERE player_token = ? LIMIT 1');
+  $stmt->execute([$playerToken]);
+  $row = $stmt->fetch();
+  return $row ?: null;
+}
+
+function resolve_player_id(PDO $pdo, array $payload): int {
+  $token = trim((string) ($payload['player_token'] ?? ''));
+  if ($token !== '') {
+    if (strlen($token) < 24) {
+      fail('player_token inválido');
+    }
+
+    $player = find_player_by_token($pdo, $token);
+    if (!$player) {
+      fail('Jugador inválido', 404);
+    }
+
+    return (int) $player['id'];
+  }
+
+  $playerId = (int) ($payload['player_id'] ?? 0);
+  if ($playerId <= 0) {
+    fail('player_token o player_id requerido');
+  }
+
+  if (!player_exists($pdo, $playerId)) {
+    fail('Jugador inválido', 404);
+  }
+
+  return $playerId;
+}
+
 function get_or_create_sumador_game(PDO $pdo): array {
   $stmt = $pdo->prepare('SELECT id, is_active FROM games WHERE code = ? LIMIT 1');
   $stmt->execute(['sumador']);
@@ -84,7 +118,7 @@ function get_or_create_sumador_game(PDO $pdo): array {
 
 $action = $_GET['action'] ?? '';
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
-$publicActions = ['sumador_start', 'sumador_finish'];
+$publicActions = ['sumador_start', 'sumador_finish', 'resolve_player'];
 
 if (!in_array($action, $publicActions, true)) {
   $token = auth_bearer_token();
@@ -116,8 +150,32 @@ try {
   }
 
   if ($method === 'GET' && $action === 'players') {
-    $stmt = $pdo->query('SELECT id, public_code, display_name, is_active, created_at, last_seen_at FROM players ORDER BY created_at DESC');
+    $stmt = $pdo->query('SELECT id, public_code, display_name, player_token, is_active, created_at, last_seen_at FROM players ORDER BY created_at DESC');
     ok(['rows' => $stmt->fetchAll()]);
+  }
+
+  if (($method === 'GET' || $method === 'POST') && $action === 'resolve_player') {
+    $payload = ($method === 'POST') ? body_json() : $_GET;
+    $token = trim((string) ($payload['player_token'] ?? ''));
+
+    if ($token === '') {
+      fail('player_token requerido');
+    }
+
+    if (strlen($token) < 24) {
+      fail('player_token inválido');
+    }
+
+    $player = find_player_by_token($pdo, $token);
+    if (!$player) {
+      fail('Jugador inválido', 404);
+    }
+
+    ok([
+      'player_id' => (int) $player['id'],
+      'public_code' => (string) $player['public_code'],
+      'display_name' => (string) $player['display_name'],
+    ]);
   }
 
   if ($method === 'GET' && $action === 'leaderboard') {
@@ -233,15 +291,7 @@ try {
 
   if ($method === 'POST' && $action === 'sumador_start') {
     $b = body_json();
-    $playerId = (int) ($b['player_id'] ?? 0);
-
-    if ($playerId <= 0) {
-      fail('player_id requerido');
-    }
-
-    if (!player_exists($pdo, $playerId)) {
-      fail('Jugador inválido', 404);
-    }
+    $playerId = resolve_player_id($pdo, $b);
 
     $enabled = setting_get($pdo, 'scoring_enabled', '1');
     if ($enabled !== '1') {
@@ -271,14 +321,10 @@ try {
 
   if ($method === 'POST' && $action === 'sumador_finish') {
     $b = body_json();
-    $playerId = (int) ($b['player_id'] ?? 0);
+    $playerId = resolve_player_id($pdo, $b);
     $score = (int) ($b['score'] ?? 0);
     $clicks = (int) ($b['clicks'] ?? 0);
     $durationMs = (int) ($b['duration_ms'] ?? 0);
-
-    if ($playerId <= 0) {
-      fail('player_id requerido');
-    }
 
     if ($durationMs < 8000 || $durationMs > 12000) {
       fail('duration_ms inválido');
