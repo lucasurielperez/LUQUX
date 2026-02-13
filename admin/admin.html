@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="es-AR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Admin</title>
+  <style>
+    body{font-family:system-ui,Arial;margin:18px}
+    .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+    input,button,select{padding:8px}
+    table{border-collapse:collapse;width:100%;margin-top:12px}
+    th,td{border:1px solid #ddd;padding:8px}
+    th{background:#f4f4f4;text-align:left}
+    .card{border:1px solid #ddd;border-radius:10px;padding:12px;margin:12px 0}
+    .muted{opacity:.7}
+  </style>
+</head>
+<body>
+  <h2>Admin (modo prueba)</h2>
+
+  <div class="card">
+    <div class="row">
+      <input id="token" placeholder="Admin token" style="min-width:320px">
+      <button id="saveToken">Guardar token</button>
+      <button id="ping">Ping</button>
+      <span id="status" class="muted"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>QR multiplier</h3>
+    <div class="row">
+      <select id="qrMul">
+        <option value="1">x1</option>
+        <option value="2">x2</option>
+        <option value="3">x3</option>
+      </select>
+      <button id="setMul">Aplicar</button>
+      <span id="mulMsg" class="muted"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Juegos</h3>
+    <table id="games">
+      <thead><tr><th>ID</th><th>Estado</th><th>Code</th><th>Nombre</th><th>Acción</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+<div class="card">
+  <h3>Control global</h3>
+  <div class="row">
+    <button id="btnScoringToggle">Cargando...</button>
+    <span id="scoringMsg" class="muted"></span>
+  </div>
+</div>
+
+<div class="card">
+  <h3>Últimos eventos (auditoría)</h3>
+  <button id="loadEvents">Cargar últimos 50</button>
+  <table id="events">
+    <thead>
+      <tr>
+        <th>ID</th><th>Fecha</th><th>Jugador</th><th>Tipo</th><th>Pts</th><th>Juego</th><th>QR</th><th>Nota</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h3>Resetear jugador (sin borrarlo)</h3>
+  <div class="row">
+    <input id="resetPid" placeholder="player_id" style="width:120px">
+    <button id="resetGo">Reset</button>
+    <span id="resetMsg" class="muted"></span>
+  </div>
+</div>
+
+  <div class="card">
+    <h3>Leaderboard</h3>
+    <button id="loadLb">Cargar leaderboard</button>
+    <table id="lb">
+      <thead><tr><th>#</th><th>Nombre</th><th>Código</th><th>Puntos</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>Jugadores</h3>
+    <button id="loadPlayers">Cargar jugadores</button>
+    <table id="players">
+      <thead><tr><th>ID</th><th>Nombre</th><th>Código</th><th>Acción</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>Ajuste puntos</h3>
+    <div class="row">
+      <input id="adjPid" placeholder="player_id" style="width:120px">
+      <input id="adjPts" placeholder="points_delta (ej 50 o -10)" style="width:220px">
+      <input id="adjNote" placeholder="nota" style="min-width:240px">
+      <button id="adjGo">Aplicar</button>
+      <span id="adjMsg" class="muted"></span>
+    </div>
+  </div>
+
+  <script src="admin.js"></script>
+</body>
+</html>
