@@ -118,7 +118,7 @@ function get_or_create_sumador_game(PDO $pdo): array {
 
 $action = $_GET['action'] ?? '';
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
-$publicActions = ['sumador_start', 'sumador_finish', 'resolve_player'];
+$publicActions = ['sumador_start', 'sumador_finish', 'resolve_player', 'player_info'];
 
 if (!in_array($action, $publicActions, true)) {
   $token = auth_bearer_token();
@@ -175,6 +175,31 @@ try {
       'player_id' => (int) $player['id'],
       'public_code' => (string) $player['public_code'],
       'display_name' => (string) $player['display_name'],
+    ]);
+  }
+
+  if (($method === 'GET' || $method === 'POST') && $action === 'player_info') {
+    $payload = ($method === 'POST') ? body_json() : $_GET;
+    $playerId = resolve_player_id($pdo, $payload);
+
+    $playerStmt = $pdo->prepare('SELECT display_name FROM players WHERE id = ? LIMIT 1');
+    $playerStmt->execute([$playerId]);
+    $player = $playerStmt->fetch();
+    if (!$player) {
+      fail('Jugador inválido', 404);
+    }
+
+    $game = get_or_create_sumador_game($pdo);
+
+    $playedStmt = $pdo->prepare('SELECT id FROM game_plays WHERE player_id = ? AND game_id = ? LIMIT 1');
+    $playedStmt->execute([$playerId, $game['id']]);
+    $alreadyPlayed = (bool) $playedStmt->fetchColumn();
+
+    ok([
+      'player_id' => $playerId,
+      'display_name' => (string) $player['display_name'],
+      'sumador_played' => $alreadyPlayed,
+      'status' => $alreadyPlayed ? 'Ya jugaste' : 'Disponible',
     ]);
   }
 
