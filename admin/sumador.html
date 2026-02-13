@@ -45,7 +45,8 @@
     const API = 'api.php';
     const TOTAL_MS = 10000;
     const params = new URLSearchParams(location.search);
-    const playerId = Number(params.get('player_id') || 0);
+    const playerToken = String(params.get('token') || '').trim();
+    const legacyPlayerId = Number(params.get('player_id') || 0);
 
     const startBtn = document.getElementById('startBtn');
     const playBtn = document.getElementById('playBtn');
@@ -106,7 +107,8 @@
 
       try {
         await call('sumador_finish', {
-          player_id: playerId,
+          player_token: playerToken,
+          player_id: legacyPlayerId,
           score,
           clicks,
           duration_ms: realDurationMs,
@@ -141,8 +143,8 @@
     });
 
     startBtn.addEventListener('click', async () => {
-      if (!playerId || playerId <= 0) {
-        setStatus('Falta player_id en la URL. Ej: sumador.html?player_id=123');
+      if (!playerToken && (!legacyPlayerId || legacyPlayerId <= 0)) {
+        setStatus('Falta token en la URL. Ej: sumador.html?token=TU_TOKEN');
         return;
       }
 
@@ -150,7 +152,10 @@
       setStatus('Iniciando...');
 
       try {
-        await call('sumador_start', { player_id: playerId });
+        await call('sumador_start', {
+          player_token: playerToken,
+          player_id: legacyPlayerId,
+        });
       } catch (err) {
         if (String(err.message).includes('Ya jugaste este juego')) {
           setStatus('Ya jugaste este juego.');
