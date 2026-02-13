@@ -55,9 +55,42 @@ function setting_set(PDO $pdo, string $key, string $value): void {
   $stmt->execute([$key, $value]);
 }
 
-$token = auth_bearer_token();
-if ($token === '' || !hash_equals((string) $config['admin_token'], $token)) {
-  fail('Unauthorized', 401);
+function player_exists(PDO $pdo, int $playerId): bool {
+  $stmt = $pdo->prepare('SELECT id FROM players WHERE id = ? LIMIT 1');
+  $stmt->execute([$playerId]);
+  return (bool) $stmt->fetchColumn();
+}
+
+function get_or_create_sumador_game(PDO $pdo): array {
+  $stmt = $pdo->prepare('SELECT id, is_active FROM games WHERE code = ? LIMIT 1');
+  $stmt->execute(['sumador']);
+  $row = $stmt->fetch();
+
+  if ($row) {
+    return [
+      'id' => (int) $row['id'],
+      'is_active' => (int) $row['is_active'],
+    ];
+  }
+
+  $ins = $pdo->prepare('INSERT INTO games (code, name, is_active, base_points) VALUES (?, ?, 1, 0)');
+  $ins->execute(['sumador', 'Sumador']);
+
+  return [
+    'id' => (int) $pdo->lastInsertId(),
+    'is_active' => 1,
+  ];
+}
+
+$action = $_GET['action'] ?? '';
+$method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+$publicActions = ['sumador_start', 'sumador_finish'];
+
+if (!in_array($action, $publicActions, true)) {
+  $token = auth_bearer_token();
+  if ($token === '' || !hash_equals((string) $config['admin_token'], $token)) {
+    fail('Unauthorized', 401);
+  }
 }
 
 $db = $config['db'];
@@ -71,9 +104,6 @@ try {
 } catch (PDOException $e) {
   fail('Database connection error', 500);
 }
-
-$action = $_GET['action'] ?? '';
-$method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
 try {
   if ($method === 'GET' && $action === 'ping') {
@@ -199,6 +229,101 @@ try {
     $stmt = $pdo->prepare('DELETE FROM players WHERE id = ?');
     $stmt->execute([$id]);
     ok(['deleted' => $stmt->rowCount()]);
+  }
+
+  if ($method === 'POST' && $action === 'sumador_start') {
+    $b = body_json();
+    $playerId = (int) ($b['player_id'] ?? 0);
+
+    if ($playerId <= 0) {
+      fail('player_id requerido');
+    }
+
+    if (!player_exists($pdo, $playerId)) {
+      fail('Jugador inválido', 404);
+    }
+
+    $enabled = setting_get($pdo, 'scoring_enabled', '1');
+    if ($enabled !== '1') {
+      fail('El puntaje está pausado', 403);
+    }
+
+    $game = get_or_create_sumador_game($pdo);
+    if ($game['is_active'] !== 1) {
+      fail('Juego no disponible', 403);
+    }
+
+    $stmt = $pdo->prepare('INSERT INTO game_plays (player_id, game_id) VALUES (?, ?)');
+    try {
+      $stmt->execute([$playerId, $game['id']]);
+    } catch (PDOException $e) {
+      if ((string) $e->getCode() === '23000') {
+        fail('Ya jugaste este juego', 409);
+      }
+      throw $e;
+    }
+
+    ok([
+      'duration_ms' => 10000,
+      'game_id' => $game['id'],
+    ]);
+  }
+
+  if ($method === 'POST' && $action === 'sumador_finish') {
+    $b = body_json();
+    $playerId = (int) ($b['player_id'] ?? 0);
+    $score = (int) ($b['score'] ?? 0);
+    $clicks = (int) ($b['clicks'] ?? 0);
+    $durationMs = (int) ($b['duration_ms'] ?? 0);
+
+    if ($playerId <= 0) {
+      fail('player_id requerido');
+    }
+
+    if ($durationMs < 8000 || $durationMs > 12000) {
+      fail('duration_ms inválido');
+    }
+    if ($clicks < 0 || $clicks > 2000) {
+      fail('clicks inválido');
+    }
+    if ($score < -2000 || $score > 2000) {
+      fail('score inválido');
+    }
+
+    $game = get_or_create_sumador_game($pdo);
+
+    $stmt = $pdo->prepare(
+      'SELECT id
+       FROM game_plays
+       WHERE player_id = ? AND game_id = ? AND finished_at IS NULL
+       LIMIT 1'
+    );
+    $stmt->execute([$playerId, $game['id']]);
+    $play = $stmt->fetch();
+
+    if (!$play) {
+      fail('Partida no iniciada o ya finalizada', 409);
+    }
+
+    $pdo->beginTransaction();
+
+    $up = $pdo->prepare('UPDATE game_plays SET finished_at = NOW(), duration_ms = ?, attempts = ?, score = ? WHERE id = ?');
+    $up->execute([$durationMs, $clicks, $score, (int) $play['id']]);
+
+    $note = sprintf('Sumador (clicks=%d)', $clicks);
+    $ins = $pdo->prepare(
+      "INSERT INTO score_events (player_id, event_type, game_id, attempts, duration_ms, points_delta, note)
+       VALUES (?, 'GAME_RESULT', ?, ?, ?, ?, ?)"
+    );
+    $ins->execute([$playerId, $game['id'], $clicks, $durationMs, $score, $note]);
+
+    $pdo->commit();
+
+    ok([
+      'score' => $score,
+      'clicks' => $clicks,
+      'duration_ms' => $durationMs,
+    ]);
   }
 
   fail('Not found', 404);

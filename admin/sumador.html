@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="es-AR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Juego 1: Sumador</title>
+  <style>
+    body{font-family:system-ui,Arial;margin:18px;max-width:800px}
+    .card{border:1px solid #ddd;border-radius:12px;padding:16px;margin:12px 0}
+    .muted{opacity:.75}
+    .timer{font-size:40px;font-weight:700;margin:8px 0}
+    .score{font-size:30px;font-weight:700;margin:8px 0}
+    #playBtn{width:100%;max-width:520px;height:240px;font-size:120px;font-weight:700;border-radius:20px;border:2px solid #444;cursor:pointer}
+    #startBtn{padding:10px 16px}
+    .danger{color:#9b1c1c}
+  </style>
+</head>
+<body>
+  <h1>Juego 1: Sumador</h1>
+
+  <div class="card">
+    <p>Duración total: <strong>10 segundos</strong>.</p>
+    <p>Un botón gigante alterna entre <strong>+</strong> y <strong>-</strong> en intervalos aleatorios (0.0 a 1.0s).</p>
+    <ul>
+      <li><strong>+</strong> suma 1 punto.</li>
+      <li><strong>-</strong> resta 1 punto.</li>
+      <li>Podés hacer clicks ilimitados, pero si tocás mucho el <strong>-</strong>, vas a perder muchos puntos.</li>
+    </ul>
+    <p class="danger">Cada jugador puede jugar solo una vez.</p>
+    <button id="startBtn">Comenzar</button>
+    <span id="status" class="muted"></span>
+  </div>
+
+  <div class="card">
+    <div>Cuenta regresiva</div>
+    <div id="timer" class="timer">10.0</div>
+    <div>Puntaje</div>
+    <div id="score" class="score">0</div>
+    <div>Clicks: <span id="clicks">0</span></div>
+  </div>
+
+  <button id="playBtn" disabled>+</button>
+
+  <script>
+    const API = 'api.php';
+    const TOTAL_MS = 10000;
+    const params = new URLSearchParams(location.search);
+    const playerId = Number(params.get('player_id') || 0);
+
+    const startBtn = document.getElementById('startBtn');
+    const playBtn = document.getElementById('playBtn');
+    const timerEl = document.getElementById('timer');
+    const scoreEl = document.getElementById('score');
+    const clicksEl = document.getElementById('clicks');
+    const statusEl = document.getElementById('status');
+
+    let score = 0;
+    let clicks = 0;
+    let running = false;
+    let gameStartMs = 0;
+    let countdownTimer = null;
+    let symbolTimer = null;
+
+    function setStatus(msg) {
+      statusEl.textContent = msg;
+    }
+
+    async function call(action, body) {
+      const res = await fetch(`${API}?action=${encodeURIComponent(action)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body || {}),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+      return data;
+    }
+
+    function nextSymbol() {
+      if (!running) return;
+      playBtn.textContent = Math.random() < 0.5 ? '+' : '-';
+      const nextMs = Math.floor(Math.random() * 1000);
+      symbolTimer = setTimeout(nextSymbol, nextMs);
+    }
+
+    function render() {
+      scoreEl.textContent = String(score);
+      clicksEl.textContent = String(clicks);
+    }
+
+    function stopTimers() {
+      if (countdownTimer) clearInterval(countdownTimer);
+      if (symbolTimer) clearTimeout(symbolTimer);
+      countdownTimer = null;
+      symbolTimer = null;
+    }
+
+    async function finishGame() {
+      running = false;
+      stopTimers();
+      playBtn.disabled = true;
+      const realDurationMs = Math.round(performance.now() - gameStartMs);
+      timerEl.textContent = '0.0';
+
+      try {
+        await call('sumador_finish', {
+          player_id: playerId,
+          score,
+          clicks,
+          duration_ms: realDurationMs,
+        });
+        setStatus(`Juego finalizado. Puntaje final: ${score}.`);
+      } catch (err) {
+        setStatus(`Error al guardar: ${err.message}`);
+      }
+    }
+
+    function startLoop() {
+      gameStartMs = performance.now();
+      running = true;
+      playBtn.disabled = false;
+      nextSymbol();
+
+      countdownTimer = setInterval(() => {
+        const elapsed = performance.now() - gameStartMs;
+        const remaining = Math.max(0, TOTAL_MS - elapsed);
+        timerEl.textContent = (remaining / 1000).toFixed(1);
+        if (remaining <= 0) {
+          finishGame();
+        }
+      }, 50);
+    }
+
+    playBtn.addEventListener('click', () => {
+      if (!running) return;
+      clicks += 1;
+      score += (playBtn.textContent === '+') ? 1 : -1;
+      render();
+    });
+
+    startBtn.addEventListener('click', async () => {
+      if (!playerId || playerId <= 0) {
+        setStatus('Falta player_id en la URL. Ej: sumador.html?player_id=123');
+        return;
+      }
+
+      startBtn.disabled = true;
+      setStatus('Iniciando...');
+
+      try {
+        await call('sumador_start', { player_id: playerId });
+      } catch (err) {
+        if (String(err.message).includes('Ya jugaste este juego')) {
+          setStatus('Ya jugaste este juego.');
+        } else {
+          setStatus(`No se pudo iniciar: ${err.message}`);
+        }
+        return;
+      }
+
+      score = 0;
+      clicks = 0;
+      timerEl.textContent = '10.0';
+      render();
+      setStatus('¡Jugando!');
+      startLoop();
+    });
+  </script>
+</body>
+</html>
