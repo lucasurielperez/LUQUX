@@ -19,6 +19,12 @@
   <h1>Juego 1: Sumador</h1>
 
   <div class="card">
+    <h3>Acceso</h3>
+    <p>Jugador: <strong id="playerName">—</strong></p>
+    <p>Estado: <strong id="playerStatus">Cargando...</strong></p>
+  </div>
+
+  <div class="card">
     <p>Duración total: <strong>10 segundos</strong>.</p>
     <p>Un botón gigante alterna entre <strong>+</strong> y <strong>-</strong> en intervalos aleatorios (0.0 a 1.0s).</p>
     <ul>
@@ -54,6 +60,8 @@
     const scoreEl = document.getElementById('score');
     const clicksEl = document.getElementById('clicks');
     const statusEl = document.getElementById('status');
+    const playerNameEl = document.getElementById('playerName');
+    const playerStatusEl = document.getElementById('playerStatus');
 
     let score = 0;
     let clicks = 0;
@@ -61,6 +69,7 @@
     let gameStartMs = 0;
     let countdownTimer = null;
     let symbolTimer = null;
+    let playerAvailable = false;
 
     function setStatus(msg) {
       statusEl.textContent = msg;
@@ -77,6 +86,39 @@
         throw new Error(data.error || `HTTP ${res.status}`);
       }
       return data;
+    }
+
+    async function fetchPlayerInfo() {
+      if (!playerToken && (!legacyPlayerId || legacyPlayerId <= 0)) {
+        playerNameEl.textContent = 'No identificado';
+        playerStatusEl.textContent = 'Falta token o player_id';
+        setStatus('Falta token en la URL. Ej: sumador.html?token=TU_TOKEN');
+        startBtn.disabled = true;
+        return;
+      }
+
+      try {
+        const data = await call('player_info', {
+          player_token: playerToken,
+          player_id: legacyPlayerId,
+        });
+
+        playerNameEl.textContent = data.display_name || 'Sin nombre';
+        playerStatusEl.textContent = data.status || (data.sumador_played ? 'Ya jugaste' : 'Disponible');
+        playerAvailable = !data.sumador_played;
+        startBtn.disabled = !playerAvailable;
+
+        if (!playerAvailable) {
+          setStatus('Ya jugaste este juego.');
+        } else {
+          setStatus('Listo para jugar.');
+        }
+      } catch (err) {
+        playerNameEl.textContent = 'No identificado';
+        playerStatusEl.textContent = 'No disponible';
+        setStatus(`No se pudo resolver el jugador: ${err.message}`);
+        startBtn.disabled = true;
+      }
     }
 
     function nextSymbol() {
@@ -143,6 +185,11 @@
     });
 
     startBtn.addEventListener('click', async () => {
+      if (!playerAvailable) {
+        setStatus('Jugador no disponible para jugar.');
+        return;
+      }
+
       if (!playerToken && (!legacyPlayerId || legacyPlayerId <= 0)) {
         setStatus('Falta token en la URL. Ej: sumador.html?token=TU_TOKEN');
         return;
@@ -159,9 +206,12 @@
       } catch (err) {
         if (String(err.message).includes('Ya jugaste este juego')) {
           setStatus('Ya jugaste este juego.');
+          playerStatusEl.textContent = 'Ya jugaste';
+          playerAvailable = false;
         } else {
           setStatus(`No se pudo iniciar: ${err.message}`);
         }
+        startBtn.disabled = !playerAvailable;
         return;
       }
 
@@ -172,6 +222,9 @@
       setStatus('¡Jugando!');
       startLoop();
     });
+
+    startBtn.disabled = true;
+    fetchPlayerInfo();
   </script>
 </body>
 </html>
