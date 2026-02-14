@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="es-AR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Admin · Error logs</title>
+  <style>
+    body{font-family:system-ui,Arial;margin:18px}
+    .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+    .muted{opacity:.7}
+    table{border-collapse:collapse;width:100%;margin-top:12px}
+    th,td{border:1px solid #ddd;padding:8px;vertical-align:top}
+    th{background:#f4f4f4;text-align:left}
+    .badge{padding:2px 8px;border-radius:12px;font-size:12px}
+    .ERROR,.FATAL{background:#ffdddd;color:#900}
+    .WARN{background:#fff4d6;color:#8a5a00}
+    .INFO,.DEBUG{background:#e8f1ff;color:#0f3f8a}
+    dialog{max-width:800px;width:95%}
+    pre{white-space:pre-wrap;word-break:break-word}
+  </style>
+</head>
+<body>
+  <h2>Error logs</h2>
+  <div class="row">
+    <input id="token" placeholder="Admin token" style="min-width:280px">
+    <button id="saveToken">Guardar token</button>
+    <button id="refresh">Refrescar</button>
+    <select id="level">
+      <option value="">ALL</option>
+      <option value="ERROR">ERROR</option>
+      <option value="FATAL">FATAL</option>
+      <option value="WARN">WARN</option>
+    </select>
+    <select id="source">
+      <option value="db">DB</option>
+      <option value="file">FILE</option>
+    </select>
+    <button id="clear">Limpiar</button>
+    <label><input type="checkbox" id="polling"> Auto refresh (5s)</label>
+  </div>
+  <p class="muted" id="meta"></p>
+
+  <table>
+    <thead>
+      <tr><th>Hora</th><th>Level</th><th>Message</th><th>file:line</th><th>request_id</th><th>Detalle</th></tr>
+    </thead>
+    <tbody id="rows"></tbody>
+  </table>
+
+  <dialog id="detailModal">
+    <h3>Detalle</h3>
+    <pre id="detailContent"></pre>
+    <button id="closeModal">Cerrar</button>
+  </dialog>
+
+  <script src="errors.js"></script>
+</body>
+</html>
