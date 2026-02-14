@@ -107,6 +107,73 @@ function resolve_player_id_from_body(PDO $pdo, array $payload): int {
   return resolve_player_id($pdo, $payload);
 }
 
+function resolve_game_mode(array $payload): string {
+  $modeRaw = strtolower(trim((string) ($payload['mode'] ?? 'real')));
+  if ($modeRaw === '') {
+    $modeRaw = 'real';
+  }
+
+  if ($modeRaw !== 'practice' && $modeRaw !== 'real') {
+    fail('mode inválido', 422, 'INVALID_MODE');
+  }
+
+  return $modeRaw;
+}
+
+function has_real_play(PDO $pdo, int $playerId, int $gameId): bool {
+  $stmt = $pdo->prepare('SELECT id FROM game_plays WHERE player_id = ? AND game_id = ? AND is_practice = 0 LIMIT 1');
+  $stmt->execute([$playerId, $gameId]);
+  return (bool) $stmt->fetchColumn();
+}
+
+function practice_play_count(PDO $pdo, int $playerId, int $gameId): int {
+  $stmt = $pdo->prepare('SELECT COUNT(*) FROM game_plays WHERE player_id = ? AND game_id = ? AND is_practice = 1');
+  $stmt->execute([$playerId, $gameId]);
+  return (int) $stmt->fetchColumn();
+}
+
+function can_play(PDO $pdo, int $playerId, int $gameId, string $mode): bool {
+  if ($mode === 'practice') {
+    return true;
+  }
+
+  return !has_real_play($pdo, $playerId, $gameId);
+}
+
+function start_play(PDO $pdo, int $playerId, int $gameId, string $mode): int {
+  $isPractice = ($mode === 'practice') ? 1 : 0;
+  $stmt = $pdo->prepare('INSERT INTO game_plays (player_id, game_id, is_practice) VALUES (?, ?, ?)');
+  $stmt->execute([$playerId, $gameId, $isPractice]);
+  return (int) $pdo->lastInsertId();
+}
+
+function find_open_play(PDO $pdo, int $playerId, int $gameId, string $mode): ?array {
+  $isPractice = ($mode === 'practice') ? 1 : 0;
+  $stmt = $pdo->prepare(
+    'SELECT id
+     FROM game_plays
+     WHERE player_id = ? AND game_id = ? AND is_practice = ? AND finished_at IS NULL
+     ORDER BY id DESC
+     LIMIT 1'
+  );
+  $stmt->execute([$playerId, $gameId, $isPractice]);
+  $row = $stmt->fetch();
+  return $row ?: null;
+}
+
+function apply_points_if_real(PDO $pdo, int $playerId, int $gameId, string $mode, int $clicks, int $durationMs, int $score): void {
+  if ($mode !== 'real') {
+    return;
+  }
+
+  $note = sprintf('Sumador (clicks=%d)', $clicks);
+  $ins = $pdo->prepare(
+    "INSERT INTO score_events (player_id, event_type, game_id, attempts, duration_ms, points_delta, note)
+     VALUES (?, 'GAME_RESULT', ?, ?, ?, ?, ?)"
+  );
+  $ins->execute([$playerId, $gameId, $clicks, $durationMs, $score, $note]);
+}
+
 function get_players_by_device(PDO $pdo, string $deviceId): array {
   $stmt = $pdo->prepare('SELECT id, display_name, public_code, player_token, device_slot FROM players WHERE device_fingerprint = ? ORDER BY device_slot ASC, id ASC');
   $stmt->execute([$deviceId]);
@@ -405,13 +472,14 @@ try {
 
     $game = get_or_create_sumador_game($pdo);
 
-    $playedStmt = $pdo->prepare('SELECT id FROM game_plays WHERE player_id = ? AND game_id = ? LIMIT 1');
-    $playedStmt->execute([$playerId, $game['id']]);
-    $alreadyPlayed = (bool) $playedStmt->fetchColumn();
+    $alreadyPlayed = has_real_play($pdo, $playerId, $game['id']);
+    $practiceCount = practice_play_count($pdo, $playerId, $game['id']);
 
     ok([
       'player_id' => $playerId,
       'display_name' => (string) $player['display_name'],
+      'sumador_played_real' => $alreadyPlayed,
+      'sumador_practice_count' => $practiceCount,
       'sumador_played' => $alreadyPlayed,
       'status' => $alreadyPlayed ? 'Ya jugaste' : 'Disponible',
     ]);
@@ -684,10 +752,13 @@ try {
   if ($method === 'POST' && $action === 'sumador_start') {
     $b = body_json();
     $playerId = resolve_player_id_from_body($pdo, $b);
+    $mode = resolve_game_mode($b);
 
-    $enabled = setting_get($pdo, 'scoring_enabled', '1');
-    if ($enabled !== '1') {
-      fail('El puntaje está pausado', 403);
+    if ($mode === 'real') {
+      $enabled = setting_get($pdo, 'scoring_enabled', '1');
+      if ($enabled !== '1') {
+        fail('El puntaje está pausado', 403);
+      }
     }
 
     $game = get_or_create_sumador_game($pdo);
@@ -695,25 +766,23 @@ try {
       fail('Juego no disponible', 403);
     }
 
-    $stmt = $pdo->prepare('INSERT INTO game_plays (player_id, game_id) VALUES (?, ?)');
-    try {
-      $stmt->execute([$playerId, $game['id']]);
-    } catch (PDOException $e) {
-      if ((string) $e->getCode() === '23000') {
-        fail('Ya jugaste este juego', 409);
-      }
-      throw $e;
+    if (!can_play($pdo, $playerId, $game['id'], $mode)) {
+      fail('Ya jugaste este juego (modo real).', 409, 'REAL_MODE_ALREADY_PLAYED');
     }
+
+    start_play($pdo, $playerId, $game['id'], $mode);
 
     ok([
       'duration_ms' => 20000,
       'game_id' => $game['id'],
+      'mode' => $mode,
     ]);
   }
 
   if ($method === 'POST' && $action === 'sumador_finish') {
     $b = body_json();
     $playerId = resolve_player_id_from_body($pdo, $b);
+    $mode = resolve_game_mode($b);
     $score = (int) ($b['score'] ?? 0);
     $clicks = (int) ($b['clicks'] ?? 0);
     $durationMs = (int) ($b['duration_ms'] ?? 0);
@@ -730,14 +799,7 @@ try {
 
     $game = get_or_create_sumador_game($pdo);
 
-    $stmt = $pdo->prepare(
-      'SELECT id
-       FROM game_plays
-       WHERE player_id = ? AND game_id = ? AND finished_at IS NULL
-       LIMIT 1'
-    );
-    $stmt->execute([$playerId, $game['id']]);
-    $play = $stmt->fetch();
+    $play = find_open_play($pdo, $playerId, $game['id'], $mode);
 
     if (!$play) {
       fail('Partida no iniciada o ya finalizada', 409);
@@ -748,12 +810,7 @@ try {
     $up = $pdo->prepare('UPDATE game_plays SET finished_at = NOW(), duration_ms = ?, attempts = ?, score = ? WHERE id = ?');
     $up->execute([$durationMs, $clicks, $score, (int) $play['id']]);
 
-    $note = sprintf('Sumador (clicks=%d)', $clicks);
-    $ins = $pdo->prepare(
-      "INSERT INTO score_events (player_id, event_type, game_id, attempts, duration_ms, points_delta, note)
-       VALUES (?, 'GAME_RESULT', ?, ?, ?, ?, ?)"
-    );
-    $ins->execute([$playerId, $game['id'], $clicks, $durationMs, $score, $note]);
+    apply_points_if_real($pdo, $playerId, $game['id'], $mode, $clicks, $durationMs, $score);
 
     $pdo->commit();
 
@@ -761,6 +818,8 @@ try {
       'score' => $score,
       'clicks' => $clicks,
       'duration_ms' => $durationMs,
+      'mode' => $mode,
+      'message' => $mode === 'practice' ? 'guardado (práctica)' : 'guardado (real)',
     ]);
   }
 
