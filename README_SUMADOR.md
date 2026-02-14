@@ -67,3 +67,14 @@ En `admin/config.php` configurar:
   - `admin_virus_toggle`
   - `admin_virus_reset_session`
   - `admin_virus_leaderboard`
+
+
+### Prueba manual de overlays Virus (3s + fondo animado)
+1. Iniciar sesión Virus desde `admin/admin.html`.
+2. Preparar 2 jugadores activos (A y B) con `admin/virus.html`.
+3. Forzar **VV**: iniciar una sesión donde ambos tengan rol virus (o repetir hasta obtenerlo), escanear A→B y validar fondo verde con burbujas, iconos grandes y marcador `antes → después`.
+4. Forzar **AA**: ambos antídoto, escanear y validar fondo azul con cruces/sparkles.
+5. Forzar **VA**: virus vs antídoto, escanear y validar fondo dividido + impacto central breve (`✨`).
+6. Repetir el mismo par A↔B para provocar `409 ALREADY_INTERACTED` y validar overlay de advertencia con texto “YA INTERACTUARON” y handles.
+7. Probar errores genéricos (QR inválido, expirado, self scan, juego inactivo) y validar overlay de error con scan-lines suaves.
+8. Activar en el sistema `prefers-reduced-motion: reduce` y verificar que los overlays siguen mostrando contenido pero sin animaciones.

@@ -19,9 +19,16 @@ function ok(array $data = []): void {
   exit;
 }
 
-function fail(string $msg, int $code = 400): void {
-  http_response_code($code);
-  echo json_encode(['ok' => false, 'error' => $msg], JSON_UNESCAPED_UNICODE);
+function fail(string $msg, int $status = 400, ?string $errorCode = null, array $extra = []): void {
+  http_response_code($status);
+  $payload = ['ok' => false, 'error' => $msg];
+  if ($errorCode !== null && $errorCode !== '') {
+    $payload['code'] = $errorCode;
+  }
+  if (!empty($extra)) {
+    $payload = array_merge($payload, $extra);
+  }
+  echo json_encode($payload, JSON_UNESCAPED_UNICODE);
   exit;
 }
 
@@ -73,12 +80,12 @@ function resolve_player_id(PDO $pdo, array $payload): int {
   $token = trim((string) ($payload['player_token'] ?? ''));
   if ($token !== '') {
     if (strlen($token) < 24) {
-      fail('player_token inválido');
+      fail('player_token inválido', 422, 'INVALID_PLAYER_TOKEN');
     }
 
     $player = find_player_by_token($pdo, $token);
     if (!$player) {
-      fail('Jugador inválido', 404);
+      fail('Jugador inválido', 404, 'PLAYER_NOT_FOUND');
     }
 
     return (int) $player['id'];
@@ -86,11 +93,11 @@ function resolve_player_id(PDO $pdo, array $payload): int {
 
   $playerId = (int) ($payload['player_id'] ?? 0);
   if ($playerId <= 0) {
-    fail('player_token o player_id requerido');
+    fail('player_token o player_id requerido', 422, 'PLAYER_REQUIRED');
   }
 
   if (!player_exists($pdo, $playerId)) {
-    fail('Jugador inválido', 404);
+    fail('Jugador inválido', 404, 'PLAYER_NOT_FOUND');
   }
 
   return $playerId;
@@ -734,7 +741,7 @@ try {
     $session = virus_get_active_session($pdo);
 
     if (!$session) {
-      fail('Juego Virus inactivo', 403);
+      fail('Juego Virus inactivo', 403, 'GAME_INACTIVE');
     }
 
     $sessionId = (int) $session['id'];
@@ -765,23 +772,25 @@ try {
 
     $session = virus_get_active_session($pdo);
     if (!$session) {
-      fail('Juego Virus inactivo', 403);
+      fail('Juego Virus inactivo', 403, 'GAME_INACTIVE');
     }
 
     $sessionId = (int) $session['id'];
     try {
       $parsed = virus_verify_payload_string($qrPayload, virus_secret($config));
     } catch (InvalidArgumentException $e) {
-      fail($e->getMessage(), 422);
+      $msg = $e->getMessage();
+      $code = ($msg === 'QR expirado') ? 'QR_EXPIRED' : 'INVALID_QR';
+      fail($msg, 422, $code);
     }
 
     if ((int) $parsed['session_id'] !== $sessionId) {
-      fail('QR de otra sesión', 409);
+      fail('QR de otra sesión', 409, 'INVALID_QR');
     }
 
     $otherId = (int) $parsed['player_id'];
     if ($otherId === $playerId) {
-      fail('No podés enfrentarte a vos mismo', 422);
+      fail('No podés enfrentarte a vos mismo', 422, 'SELF_SCAN');
     }
 
     [$a, $bId] = virus_pair_ids($playerId, $otherId);
@@ -794,12 +803,30 @@ try {
     } catch (PDOException $e) {
       if ((string) $e->getCode() === '23000') {
         $pdo->rollBack();
-        fail('Ya interactuaste con este jugador en esta sesión', 409);
+        $playersStmt = $pdo->prepare('SELECT id, display_name FROM players WHERE id IN (?, ?) ORDER BY id ASC');
+        $playersStmt->execute([$playerId, $otherId]);
+        $players = array_map(fn($row) => [
+          'id' => (int) $row['id'],
+          'handle' => (string) $row['display_name'],
+        ], $playersStmt->fetchAll());
+        fail(
+          'Ya interactuaste con este jugador en esta sesión',
+          409,
+          'ALREADY_INTERACTED',
+          virus_build_already_interacted_error($sessionId, $players)
+        );
       }
       throw $e;
     }
 
-    $stateStmt = $pdo->prepare('SELECT player_id, role, power FROM virus_player_state WHERE session_id = ? AND player_id IN (?, ?) ORDER BY player_id ASC FOR UPDATE');
+    $stateStmt = $pdo->prepare(
+      'SELECT vps.player_id, p.display_name AS handle, vps.role, vps.power
+       FROM virus_player_state vps
+       INNER JOIN players p ON p.id = vps.player_id
+       WHERE vps.session_id = ? AND vps.player_id IN (?, ?)
+       ORDER BY vps.player_id ASC
+       FOR UPDATE'
+    );
     $stateStmt->execute([$sessionId, $playerId, $otherId]);
     $states = $stateStmt->fetchAll();
 
@@ -812,6 +839,7 @@ try {
     foreach ($states as $row) {
       $byPlayer[(int) $row['player_id']] = [
         'player_id' => (int) $row['player_id'],
+        'handle' => (string) $row['handle'],
         'role' => (string) $row['role'],
         'power' => (int) $row['power'],
       ];
@@ -830,6 +858,13 @@ try {
       'pre_state' => $combat['pre_state'],
       'post_state' => $combat['post_state'],
       'message' => $combat['message'],
+      'winner_player_id' => $combat['winner_player_id'],
+      'loser_player_id' => $combat['loser_player_id'],
+      'draw' => $combat['draw'],
+      'view_for_player_id' => $playerId,
+      'view_result' => virus_player_view_result($combat, $playerId),
+      'outcome_for_viewer' => virus_player_outcome_code($combat, $playerId),
+      'matchup_type' => $combat['matchup_type'],
     ]);
   }
 
