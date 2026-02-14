@@ -104,16 +104,7 @@ function resolve_player_id(PDO $pdo, array $payload): int {
 }
 
 function resolve_player_id_from_body(PDO $pdo, array $payload): int {
-  $playerId = (int) ($payload['player_id'] ?? 0);
-  if ($playerId <= 0) {
-    fail('player_id requerido', 422);
-  }
-
-  if (!player_exists($pdo, $playerId)) {
-    fail('Jugador inválido', 404);
-  }
-
-  return $playerId;
+  return resolve_player_id($pdo, $payload);
 }
 
 function get_players_by_device(PDO $pdo, string $deviceId): array {
