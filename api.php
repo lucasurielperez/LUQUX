@@ -2,6 +2,16 @@
 header('Content-Type: application/json; charset=utf-8');
 
 $BASE_DIR = is_file(__DIR__ . '/config.php') ? __DIR__ : dirname(__DIR__);
+$GLOBALS['BASE_DIR'] = $BASE_DIR;
+
+require_once $BASE_DIR . '/error_logger.php';
+
+$requestId = bin2hex(random_bytes(6));
+init_error_logging([
+  'context' => 'api',
+  'request_id' => $requestId,
+  'base_dir' => $BASE_DIR,
+]);
 
 $configPath = is_file($BASE_DIR . '/config.php')
   ? $BASE_DIR . '/config.php'
@@ -24,13 +34,15 @@ function body_json(): array {
 }
 
 function ok(array $data = []): void {
-  echo json_encode(['ok' => true] + $data, JSON_UNESCAPED_UNICODE);
+  global $requestId;
+  echo json_encode(['ok' => true, 'request_id' => $requestId] + $data, JSON_UNESCAPED_UNICODE);
   exit;
 }
 
 function fail(string $msg, int $status = 400, ?string $errorCode = null, array $extra = []): void {
+  global $requestId;
   http_response_code($status);
-  $payload = ['ok' => false, 'error' => $msg];
+  $payload = ['ok' => false, 'error' => $msg, 'request_id' => $requestId];
   if ($errorCode !== null && $errorCode !== '') {
     $payload['code'] = $errorCode;
   }
@@ -448,6 +460,72 @@ function is_unique_violation(Throwable $e): bool {
   return $sqlState === '23000' || $mysqlCode === 1062;
 }
 
+function admin_is_authorized(array $config): bool {
+  $token = auth_bearer_token();
+  return $token !== '' && hash_equals((string) $config['admin_token'], $token);
+}
+
+function error_log_file_path(): string {
+  return error_logger_file_path($GLOBALS['BASE_DIR'] ?? __DIR__);
+}
+
+function read_log_tail(string $file, int $lines = 200): array {
+  if (!is_file($file)) {
+    return [];
+  }
+
+  $lines = max(1, min(1000, $lines));
+  $fp = fopen($file, 'rb');
+  if ($fp === false) {
+    return [];
+  }
+
+  $buffer = '';
+  $chunkSize = 8192;
+  fseek($fp, 0, SEEK_END);
+  $position = ftell($fp);
+  $lineCount = 0;
+
+  while ($position > 0 && $lineCount <= $lines) {
+    $readSize = min($chunkSize, $position);
+    $position -= $readSize;
+    fseek($fp, $position);
+    $chunk = fread($fp, $readSize);
+    if ($chunk === false) {
+      break;
+    }
+    $buffer = $chunk . $buffer;
+    $lineCount = substr_count($buffer, "\n");
+  }
+
+  fclose($fp);
+
+  $rawLines = preg_split('/\r\n|\n|\r/', trim($buffer));
+  if (!is_array($rawLines)) {
+    return [];
+  }
+
+  $tail = array_slice(array_values(array_filter($rawLines, static fn($v) => $v !== '')), -$lines);
+  $rows = [];
+  foreach ($tail as $line) {
+    $decoded = json_decode($line, true);
+    if (is_array($decoded)) {
+      $rows[] = $decoded;
+    }
+  }
+  return $rows;
+}
+
+function db_table_exists(PDO $pdo, string $table): bool {
+  try {
+    $stmt = $pdo->prepare('SHOW TABLES LIKE ?');
+    $stmt->execute([$table]);
+    return (bool) $stmt->fetchColumn();
+  } catch (Throwable $e) {
+    return false;
+  }
+}
+
 $action = $_GET['action'] ?? '';
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 $publicActions = [
@@ -466,11 +544,8 @@ $publicActions = [
   'public_leaderboard_top',
 ];
 
-if (!in_array($action, $publicActions, true)) {
-  $token = auth_bearer_token();
-  if ($token === '' || !hash_equals((string) $config['admin_token'], $token)) {
-    fail('Unauthorized', 401);
-  }
+if (!in_array($action, $publicActions, true) && !admin_is_authorized($config)) {
+  fail('Unauthorized', 401);
 }
 
 $db = $config['db'];
@@ -481,6 +556,7 @@ try {
     PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
     PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
   ]);
+  error_logger_set_pdo($pdo);
 } catch (PDOException $e) {
   fail('Database connection error', 500);
 }
@@ -1376,13 +1452,104 @@ try {
     ok(['is_active' => (int) $virusGame['is_active'] === 1, 'session_id' => (int) $last['id'], 'rows' => $snapshot]);
   }
 
+
+  if ($method === 'GET' && $action === 'admin_error_logs') {
+    $limit = max(1, min(1000, (int) ($_GET['limit'] ?? 200)));
+    $level = strtoupper(trim((string) ($_GET['level'] ?? '')));
+    $since = trim((string) ($_GET['since'] ?? ''));
+    $source = strtolower(trim((string) ($_GET['source'] ?? '')));
+
+    $hasDb = db_table_exists($pdo, 'error_logs');
+    if ($source === '') {
+      $source = $hasDb ? 'db' : 'file';
+    }
+
+    $rows = [];
+
+    if ($source === 'db' && $hasDb) {
+      $sql = 'SELECT id, created_at, level, message, file, line, request_id, url, method, user_agent, ip, context, extra_json FROM error_logs';
+      $where = [];
+      $params = [];
+
+      if ($level !== '') {
+        $where[] = 'level = ?';
+        $params[] = $level;
+      }
+
+      if ($since !== '') {
+        if (ctype_digit($since)) {
+          $where[] = 'id > ?';
+          $params[] = (int) $since;
+        } else {
+          $where[] = 'created_at >= ?';
+          $params[] = $since;
+        }
+      }
+
+      if (!empty($where)) {
+        $sql .= ' WHERE ' . implode(' AND ', $where);
+      }
+
+      $sql .= ' ORDER BY id DESC LIMIT ' . $limit;
+      $stmt = $pdo->prepare($sql);
+      $stmt->execute($params);
+      $rows = $stmt->fetchAll();
+    } else {
+      $rows = array_reverse(read_log_tail(error_log_file_path(), $limit));
+      if ($level !== '') {
+        $rows = array_values(array_filter($rows, static fn(array $r): bool => strtoupper((string) ($r['level'] ?? '')) === $level));
+      }
+      if ($since !== '') {
+        $rows = array_values(array_filter($rows, static function (array $r) use ($since): bool {
+          $ts = (string) ($r['timestamp'] ?? '');
+          if ($ts === '') {
+            return false;
+          }
+          return strtotime($ts) >= strtotime($since);
+        }));
+      }
+      $rows = array_slice($rows, -$limit);
+    }
+
+    ok(['source' => $source, 'rows' => $rows]);
+  }
+
+  if ($method === 'GET' && $action === 'admin_error_log_tail') {
+    $limit = max(1, min(1000, (int) ($_GET['limit'] ?? 200)));
+    $rows = read_log_tail(error_log_file_path(), $limit);
+    ok(['rows' => $rows]);
+  }
+
+  if ($method === 'POST' && $action === 'admin_error_log_clear') {
+    $hasDb = db_table_exists($pdo, 'error_logs');
+    $clearedDb = false;
+
+    if ($hasDb) {
+      $pdo->exec('DELETE FROM error_logs');
+      $clearedDb = true;
+    }
+
+    $file = error_log_file_path();
+    if (is_file($file)) {
+      file_put_contents($file, '');
+    }
+
+    ok(['cleared_db' => $clearedDb, 'cleared_file' => $file]);
+  }
+
   fail('Not found', 404);
 } catch (PDOException $e) {
   if ($pdo->inTransaction()) {
     $pdo->rollBack();
   }
   $sqlState = (string) ($e->errorInfo[0] ?? $e->getCode() ?? 'UNKNOWN');
-  error_log(sprintf('api.php action=%s SQLSTATE=%s message=%s', (string) $action, $sqlState, $e->getMessage()));
+  log_event('ERROR', $e->getMessage(), [
+    'file' => $e->getFile(),
+    'line' => $e->getLine(),
+    'sql_state' => $sqlState,
+    'trace' => $e->getTraceAsString(),
+    'action' => (string) $action,
+  ]);
 
   $extra = [];
   if (is_debug_mode($config)) {
@@ -1394,5 +1561,22 @@ try {
   if ($pdo->inTransaction()) {
     $pdo->rollBack();
   }
-  fail('Server error', 500);
+  log_event('ERROR', $e->getMessage(), [
+    'file' => $e->getFile(),
+    'line' => $e->getLine(),
+    'trace' => $e->getTraceAsString(),
+    'action' => (string) $action,
+  ]);
+
+  $isDebugView = isset($_GET['debug_view']) && (string) $_GET['debug_view'] === '1' && admin_is_authorized($config);
+  if ($isDebugView) {
+    fail('EXCEPTION', 500, 'EXCEPTION', [
+      'message' => $e->getMessage(),
+      'file' => $e->getFile(),
+      'line' => $e->getLine(),
+      'trace' => $e->getTraceAsString(),
+    ]);
+  }
+
+  fail('EXCEPTION', 500, 'EXCEPTION', ['message' => $e->getMessage()]);
 }
