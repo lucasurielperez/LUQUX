@@ -184,11 +184,12 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       const player_id = Number(el('resetPid').value);
       if (!player_id) return;
-      if (!confirm(`Resetear player_id=${player_id}? (borra puntos y QRs de ese jugador)`)) return;
-      await call('reset_player', 'POST', { player_id });
-      el('resetMsg').textContent = 'reseteado';
+      if (!confirm(`Reset TOTAL de player_id=${player_id}? (borra puntajes, QRs y partidas para habilitar rejugar)`)) return;
+      const result = await call('reset_player', 'POST', { player_id });
+      el('resetMsg').textContent = `ok · score_events=${result.deleted_score_events ?? 0}, qr_claims=${result.deleted_qr_claims ?? 0}, game_plays=${result.deleted_game_plays ?? 0}`;
       await loadLeaderboard();
       await loadPlayers();
+      await loadEvents();
     } catch (e) {
       el('resetMsg').textContent = `Error: ${e.message}`;
     }
