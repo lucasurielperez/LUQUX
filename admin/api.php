@@ -116,6 +116,22 @@ function resolve_player_id_from_body(PDO $pdo, array $payload): int {
   return $playerId;
 }
 
+function get_players_by_device(PDO $pdo, string $deviceId): array {
+  $stmt = $pdo->prepare('SELECT id, display_name, public_code, player_token, device_slot FROM players WHERE device_fingerprint = ? ORDER BY device_slot ASC, id ASC');
+  $stmt->execute([$deviceId]);
+  $rows = $stmt->fetchAll();
+
+  return array_map(static function (array $row): array {
+    return [
+      'id' => (int) $row['id'],
+      'display_name' => (string) $row['display_name'],
+      'public_code' => (string) $row['public_code'],
+      'player_token' => (string) $row['player_token'],
+      'device_slot' => (int) $row['device_slot'],
+    ];
+  }, $rows);
+}
+
 function get_or_create_sumador_game(PDO $pdo): array {
   $stmt = $pdo->prepare('SELECT id, is_active FROM games WHERE code = ? LIMIT 1');
   $stmt->execute(['sumador']);
@@ -318,6 +334,7 @@ $publicActions = [
   'player_info',
   'player_register',
   'player_me',
+  'device_players',
   'player_rename',
   'virus_status',
   'virus_my_qr',
@@ -414,42 +431,51 @@ try {
     $displayName = validate_display_name((string) ($b['display_name'] ?? ''));
     $deviceId = validate_device_id((string) ($b['device_id'] ?? ''));
 
-    $find = $pdo->prepare('SELECT id, display_name, public_code, player_token FROM players WHERE device_fingerprint = ? LIMIT 1');
-    $find->execute([$deviceId]);
-    $existing = $find->fetch();
+    $requestedSlot = isset($b['device_slot']) ? (int) $b['device_slot'] : 0;
+    if ($requestedSlot !== 0 && $requestedSlot !== 1 && $requestedSlot !== 2) {
+      fail('device_slot inválido', 422, 'INVALID_DEVICE_SLOT');
+    }
 
-    if ($existing) {
-      $up = $pdo->prepare('UPDATE players SET display_name = ?, last_seen_at = NOW() WHERE id = ?');
-      $up->execute([$displayName, (int) $existing['id']]);
+    $existingPlayers = get_players_by_device($pdo, $deviceId);
+    $count = count($existingPlayers);
 
-      ok([
-        'player' => [
-          'id' => (int) $existing['id'],
-          'display_name' => $displayName,
-          'public_code' => (string) $existing['public_code'],
-          'player_token' => (string) $existing['player_token'],
-        ],
-      ]);
+    if ($count >= 2) {
+      fail('Este celu ya tiene 2 jugadores cargados', 409, 'DEVICE_FULL');
+    }
+
+    $occupiedSlots = array_column($existingPlayers, 'device_slot');
+    if ($requestedSlot > 0) {
+      if (in_array($requestedSlot, $occupiedSlots, true)) {
+        fail('Ese lugar ya está ocupado en este dispositivo', 409, 'SLOT_TAKEN');
+      }
+      $deviceSlot = $requestedSlot;
+    } else {
+      $deviceSlot = in_array(1, $occupiedSlots, true) ? 2 : 1;
     }
 
     $created = null;
     for ($attempt = 0; $attempt < 10; $attempt++) {
       $publicCode = generate_public_code($pdo, 8);
       $playerToken = strtolower(hash('sha256', random_bytes(32)));
-      $ins = $pdo->prepare('INSERT INTO players (display_name, device_fingerprint, public_code, player_token, last_seen_at) VALUES (?, ?, ?, ?, NOW())');
+      $ins = $pdo->prepare('INSERT INTO players (display_name, device_fingerprint, device_slot, public_code, player_token, last_seen_at) VALUES (?, ?, ?, ?, ?, NOW())');
 
       try {
-        $ins->execute([$displayName, $deviceId, $publicCode, $playerToken]);
+        $ins->execute([$displayName, $deviceId, $deviceSlot, $publicCode, $playerToken]);
         $created = [
           'id' => (int) $pdo->lastInsertId(),
           'display_name' => $displayName,
           'public_code' => $publicCode,
           'player_token' => $playerToken,
+          'device_slot' => $deviceSlot,
         ];
         break;
       } catch (PDOException $e) {
         if ((string) $e->getCode() !== '23000') {
           throw $e;
+        }
+
+        if (str_contains((string) $e->getMessage(), 'uq_players_device_slot')) {
+          fail('Ese lugar ya está ocupado en este dispositivo', 409, 'SLOT_TAKEN');
         }
       }
     }
@@ -464,24 +490,32 @@ try {
   if ($method === 'GET' && $action === 'player_me') {
     $deviceId = validate_device_id((string) ($_GET['device_id'] ?? ''));
 
-    $stmt = $pdo->prepare('SELECT id, display_name, public_code, player_token FROM players WHERE device_fingerprint = ? LIMIT 1');
-    $stmt->execute([$deviceId]);
-    $player = $stmt->fetch();
+    $players = get_players_by_device($pdo, $deviceId);
+    $count = count($players);
 
-    if ($player) {
-      $touch = $pdo->prepare('UPDATE players SET last_seen_at = NOW() WHERE id = ?');
-      $touch->execute([(int) $player['id']]);
-      ok([
-        'player' => [
-          'id' => (int) $player['id'],
-          'display_name' => (string) $player['display_name'],
-          'public_code' => (string) $player['public_code'],
-          'player_token' => (string) $player['player_token'],
-        ],
-      ]);
+    if ($count > 0) {
+      $touch = $pdo->prepare('UPDATE players SET last_seen_at = NOW() WHERE device_fingerprint = ?');
+      $touch->execute([$deviceId]);
     }
 
-    ok(['player' => null]);
+    $response = [
+      'players' => $players,
+      'count' => $count,
+      'player' => $count === 1 ? $players[0] : null,
+    ];
+
+    ok($response);
+  }
+
+  if ($method === 'GET' && $action === 'device_players') {
+    $deviceId = validate_device_id((string) ($_GET['device_id'] ?? ''));
+    $players = get_players_by_device($pdo, $deviceId);
+
+    ok([
+      'players' => $players,
+      'count' => count($players),
+      'player' => count($players) === 1 ? $players[0] : null,
+    ]);
   }
 
   if ($method === 'POST' && $action === 'player_rename') {
@@ -494,7 +528,7 @@ try {
       fail('player_id requerido', 422);
     }
 
-    $stmt = $pdo->prepare('SELECT id, public_code, player_token FROM players WHERE id = ? AND device_fingerprint = ? LIMIT 1');
+    $stmt = $pdo->prepare('SELECT id, public_code, player_token, device_slot FROM players WHERE id = ? AND device_fingerprint = ? LIMIT 1');
     $stmt->execute([$playerId, $deviceId]);
     $player = $stmt->fetch();
 
@@ -511,6 +545,7 @@ try {
         'display_name' => $displayName,
         'public_code' => (string) $player['public_code'],
         'player_token' => (string) $player['player_token'],
+        'device_slot' => (int) $player['device_slot'],
       ],
     ]);
   }
