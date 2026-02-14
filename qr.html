@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="es-AR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Canje QR</title>
+  <style>
+    body{margin:0;font-family:system-ui;background:#0b1020;color:#e5e7eb;display:flex;min-height:100vh;align-items:center;justify-content:center}
+    .box{width:min(540px,92vw);background:#111827;border:1px solid #334155;border-radius:16px;padding:24px;text-align:center}
+    .big{font-size:72px;font-weight:800;margin:12px 0}
+    .ok{color:#22c55e}.bad{color:#ef4444}.muted{opacity:.75}
+    button,a{display:inline-block;margin-top:12px;padding:10px 16px;border-radius:10px;border:0;background:#22c55e;color:#052e16;font-weight:700;text-decoration:none}
+  </style>
+</head>
+<body>
+  <div class="box">
+    <h2>Procesando QR…</h2>
+    <div id="result" class="muted">Esperá un instante</div>
+    <div id="actions"></div>
+  </div>
+
+  <script src="admin/player_context.js"></script>
+  <script>
+    (async function () {
+      const resultEl = document.getElementById('result');
+      const actionsEl = document.getElementById('actions');
+      const code = new URLSearchParams(location.search).get('code') || '';
+
+      function showButton(label, href) {
+        actionsEl.innerHTML = '';
+        const a = document.createElement('a');
+        a.textContent = label;
+        a.href = href || 'index.html';
+        actionsEl.appendChild(a);
+      }
+
+      if (!code) {
+        resultEl.textContent = 'QR inválido: falta code.';
+        resultEl.className = 'bad';
+        showButton('Volver', 'index.html');
+        return;
+      }
+
+      try {
+        const player = await window.PlayerContext.ensureActivePlayerForThisDevice();
+        const res = await fetch('api.php?action=qr_claim', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code, player_token: player.player_token, player_id: player.id })
+        });
+        const data = await res.json();
+
+        if (!res.ok || !data.ok) {
+          if (data.code === 'ALREADY_CLAIMED') {
+            resultEl.innerHTML = '<h3>Ya canjeaste este QR</h3>';
+          } else if (data.code === 'GAME_INACTIVE') {
+            resultEl.innerHTML = '<h3>Ese juego está apagado</h3>';
+          } else {
+            resultEl.textContent = data.error || 'No se pudo canjear el QR';
+          }
+          resultEl.className = 'bad';
+          showButton('Volver', 'index.html');
+          return;
+        }
+
+        if (data.qr_type === 'secret') {
+          const pts = Number(data.applied_points || 0);
+          resultEl.innerHTML = `<div class="big ${pts >= 0 ? 'ok' : 'bad'}">${pts > 0 ? '+' : ''}${pts}</div><div>QR secreto canjeado</div>`;
+          showButton('Seguir', 'index.html');
+          return;
+        }
+
+        if (data.qr_type === 'game') {
+          resultEl.innerHTML = `<h3>Desbloqueaste el juego ${data.game_code || ''}</h3><p class="muted">Serás redirigido automáticamente.</p>`;
+          showButton('Ir al juego', data.redirect_url || 'admin/virus.html');
+          setTimeout(() => {
+            location.href = data.redirect_url || 'admin/virus.html';
+          }, 2000);
+          return;
+        }
+
+        resultEl.textContent = 'Respuesta desconocida';
+        resultEl.className = 'bad';
+        showButton('Volver', 'index.html');
+      } catch (err) {
+        resultEl.textContent = err.message || 'Error de red';
+        resultEl.className = 'bad';
+        showButton('Volver', 'index.html');
+      }
+    })();
+  </script>
+</body>
+</html>
