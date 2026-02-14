@@ -49,10 +49,9 @@
 
   <script>
     const API = 'api.php';
+    const WELCOME_PAGE = '../index.html';
+    const playerId = Number(localStorage.getItem('player_id') || 0);
     const TOTAL_MS = 10000;
-    const params = new URLSearchParams(location.search);
-    const playerToken = String(params.get('token') || '').trim();
-    const legacyPlayerId = Number(params.get('player_id') || 0);
 
     const startBtn = document.getElementById('startBtn');
     const playBtn = document.getElementById('playBtn');
@@ -89,18 +88,14 @@
     }
 
     async function fetchPlayerInfo() {
-      if (!playerToken && (!legacyPlayerId || legacyPlayerId <= 0)) {
-        playerNameEl.textContent = 'No identificado';
-        playerStatusEl.textContent = 'Falta token o player_id';
-        setStatus('Falta token en la URL. Ej: sumador.html?token=TU_TOKEN');
-        startBtn.disabled = true;
+      if (playerId <= 0) {
+        location.href = WELCOME_PAGE;
         return;
       }
 
       try {
         const data = await call('player_info', {
-          player_token: playerToken,
-          player_id: legacyPlayerId,
+          player_id: playerId,
         });
 
         playerNameEl.textContent = data.display_name || 'Sin nombre';
@@ -149,8 +144,7 @@
 
       try {
         await call('sumador_finish', {
-          player_token: playerToken,
-          player_id: legacyPlayerId,
+          player_id: playerId,
           score,
           clicks,
           duration_ms: realDurationMs,
@@ -190,8 +184,8 @@
         return;
       }
 
-      if (!playerToken && (!legacyPlayerId || legacyPlayerId <= 0)) {
-        setStatus('Falta token en la URL. Ej: sumador.html?token=TU_TOKEN');
+      if (playerId <= 0) {
+        location.href = WELCOME_PAGE;
         return;
       }
 
@@ -200,8 +194,7 @@
 
       try {
         await call('sumador_start', {
-          player_token: playerToken,
-          player_id: legacyPlayerId,
+          player_id: playerId,
         });
       } catch (err) {
         if (String(err.message).includes('Ya jugaste este juego')) {

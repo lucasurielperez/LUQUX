@@ -91,7 +91,7 @@
 
   function goToGame() {
     if (!player) return;
-    location.href = `admin/sumador.html?player_id=${encodeURIComponent(player.id)}`;
+    location.href = 'admin/sumador.html';
   }
 
   async function bootstrap() {
