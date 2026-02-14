@@ -11,17 +11,24 @@
   const newPlayerEl = document.getElementById('newPlayer');
   const knownPlayerEl = document.getElementById('knownPlayer');
   const knownNameEl = document.getElementById('knownName');
+  const playerSelectorEl = document.getElementById('playerSelector');
+  const playerSelectorListEl = document.getElementById('playerSelectorList');
   const displayNameInput = document.getElementById('displayName');
   const renameInput = document.getElementById('renameInput');
+  const secondNameInput = document.getElementById('secondNameInput');
   const renameWrap = document.getElementById('renameWrap');
+  const addSecondWrap = document.getElementById('addSecondWrap');
   const statusEl = document.getElementById('status');
 
   const startBtn = document.getElementById('startBtn');
   const continueBtn = document.getElementById('continueBtn');
   const changeNameBtn = document.getElementById('changeNameBtn');
   const saveNameBtn = document.getElementById('saveNameBtn');
+  const addSecondBtn = document.getElementById('addSecondBtn');
+  const saveSecondBtn = document.getElementById('saveSecondBtn');
 
   let player = null;
+  let players = [];
 
   function setStatus(msg) {
     statusEl.textContent = msg || '';
@@ -81,21 +88,45 @@
     }
   }
 
-  function showKnownPlayer(p) {
+  function showKnownPlayer(p, showAddSecond) {
     knownNameEl.textContent = p.display_name;
     renameInput.value = p.display_name;
     newPlayerEl.classList.add('hidden');
+    playerSelectorEl.classList.add('hidden');
     knownPlayerEl.classList.remove('hidden');
+    addSecondBtn.classList.toggle('hidden', !showAddSecond);
+    addSecondWrap.classList.add('hidden');
   }
 
   function showRegistration() {
+    player = null;
     knownPlayerEl.classList.add('hidden');
+    playerSelectorEl.classList.add('hidden');
     newPlayerEl.classList.remove('hidden');
+  }
+
+  function showSelector(list) {
+    newPlayerEl.classList.add('hidden');
+    knownPlayerEl.classList.add('hidden');
+    playerSelectorEl.classList.remove('hidden');
+    playerSelectorListEl.innerHTML = '';
+
+    list.forEach(function (p) {
+      const btn = document.createElement('button');
+      btn.className = 'player-option';
+      btn.textContent = `${p.display_name} (${p.public_code})`;
+      btn.addEventListener('click', function () {
+        savePlayer(p);
+        setStatus(`Jugador activo: ${p.display_name}.`);
+        goToGame();
+      });
+      playerSelectorListEl.appendChild(btn);
+    });
   }
 
   function goToGame() {
     if (!player) return;
-location.href = 'admin/virus.html';
+    location.href = 'admin/virus.html';
   }
 
   async function bootstrap() {
@@ -104,10 +135,18 @@ location.href = 'admin/virus.html';
 
     try {
       const data = await apiGet('player_me', { device_id: deviceId });
-      if (data.player) {
-        savePlayer(data.player);
-        showKnownPlayer(data.player);
-        setStatus('Dispositivo reconocido.');
+      players = Array.isArray(data.players) ? data.players : [];
+
+      if (data.count === 0) {
+        showRegistration();
+        setStatus('Ingresá tu nombre para arrancar.');
+      } else if (data.count === 1 && players[0]) {
+        savePlayer(players[0]);
+        showKnownPlayer(players[0], true);
+        setStatus('Dispositivo reconocido. Podés continuar o agregar un segundo jugador.');
+      } else if (data.count >= 2) {
+        showSelector(players);
+        setStatus('Elegí quién está jugando para continuar.');
       } else {
         showRegistration();
         setStatus('Ingresá tu nombre para arrancar.');
@@ -135,7 +174,8 @@ location.href = 'admin/virus.html';
       savePlayer(data.player);
       goToGame();
     } catch (err) {
-      setStatus(`No se pudo registrar: ${err.message}`);
+      const msg = /DEVICE_FULL/i.test(String(err.message)) ? 'Este celu ya tiene 2 jugadores cargados.' : err.message;
+      setStatus(`No se pudo registrar: ${msg}`);
     } finally {
       startBtn.disabled = false;
     }
@@ -146,7 +186,13 @@ location.href = 'admin/virus.html';
   });
 
   changeNameBtn.addEventListener('click', function () {
+    addSecondWrap.classList.add('hidden');
     renameWrap.classList.toggle('hidden');
+  });
+
+  addSecondBtn.addEventListener('click', function () {
+    renameWrap.classList.add('hidden');
+    addSecondWrap.classList.toggle('hidden');
   });
 
   saveNameBtn.addEventListener('click', async function () {
@@ -168,13 +214,42 @@ location.href = 'admin/virus.html';
         display_name: newName,
       });
       savePlayer(data.player);
-      showKnownPlayer(data.player);
+      showKnownPlayer(data.player, true);
       renameWrap.classList.add('hidden');
       setStatus('Nombre actualizado.');
     } catch (err) {
       setStatus(`No se pudo actualizar: ${err.message}`);
     } finally {
       saveNameBtn.disabled = false;
+    }
+  });
+
+  saveSecondBtn.addEventListener('click', async function () {
+    const newName = String(secondNameInput.value || '').trim();
+    if (!newName) {
+      setStatus('Ingresá un nombre válido para el segundo jugador.');
+      return;
+    }
+
+    saveSecondBtn.disabled = true;
+    setStatus('Registrando segundo jugador...');
+
+    try {
+      await apiPost('player_register', {
+        display_name: newName,
+        device_id: getDeviceId(),
+      });
+      secondNameInput.value = '';
+      await bootstrap();
+      if (players.length >= 2) {
+        showSelector(players);
+        setStatus('Segundo jugador agregado. Elegí quién juega.');
+      }
+    } catch (err) {
+      const msg = /DEVICE_FULL/i.test(String(err.message)) ? 'Este celu ya tiene 2 jugadores cargados.' : err.message;
+      setStatus(`No se pudo agregar: ${msg}`);
+    } finally {
+      saveSecondBtn.disabled = false;
     }
   });
 

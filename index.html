@@ -18,6 +18,7 @@
     .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
     .muted { opacity: .8; font-size: 14px; }
     .hidden { display: none; }
+    .player-option { width: 100%; text-align: left; padding: 14px; font-size: 20px; font-weight: 700; background: #ece4ff; color: #2f1b63; }
     #status { min-height: 22px; font-weight: 600; }
   </style>
 </head>
@@ -42,6 +43,7 @@
       <div class="row">
         <button id="continueBtn" class="primary">Continuar</button>
         <button id="changeNameBtn" class="secondary">Cambiar nombre</button>
+        <button id="addSecondBtn" class="secondary hidden">Agregar segundo jugador</button>
       </div>
       <div id="renameWrap" class="hidden" style="margin-top:12px;">
         <label for="renameInput">Nuevo nombre</label>
@@ -50,6 +52,18 @@
           <button id="saveNameBtn" class="secondary">Guardar nombre</button>
         </div>
       </div>
+      <div id="addSecondWrap" class="hidden" style="margin-top:12px;">
+        <label for="secondNameInput">Nombre jugador 2</label>
+        <input id="secondNameInput" type="text" maxlength="80" placeholder="Nombre del segundo jugador" />
+        <div class="row">
+          <button id="saveSecondBtn" class="secondary">Guardar segundo jugador</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="playerSelector" class="card hidden">
+      <h2>¿Quién está jugando?</h2>
+      <div id="playerSelectorList" class="row"></div>
     </section>
 
     <p id="status"></p>

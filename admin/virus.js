@@ -4,8 +4,6 @@
   const MAX_PARTICLES = 10;
   const ROLE_ICON = { virus: '🦠', antidote: '💉' };
   const MATCHUP_TO_VARIANT = { VV: 'vv', AA: 'aa', VA: 'va' };
-  const playerId = Number(localStorage.getItem('player_id') || 0);
-  const playerToken = localStorage.getItem('player_token') || '';
 
   const statusEl = document.getElementById('status');
   const pendingListEl = document.getElementById('pendingList');
@@ -42,6 +40,8 @@
   }
 
   function authPayload() {
+    const playerId = Number(localStorage.getItem('player_id') || 0);
+    const playerToken = localStorage.getItem('player_token') || '';
     if (playerToken) return { player_token: playerToken };
     return { player_id: playerId };
   }
@@ -158,6 +158,8 @@
   }
 
   async function loadStatus() {
+    const playerId = Number(localStorage.getItem('player_id') || 0);
+    const playerToken = localStorage.getItem('player_token') || '';
     if (!playerId && !playerToken) {
       setStatus('No hay identidad de jugador en este dispositivo. Volvé al inicio.');
       return;
@@ -273,6 +275,7 @@
 
   (async function init() {
     try {
+      await window.PlayerContext.ensureActivePlayerForThisDevice();
       await loadStatus();
       await loadQr();
       setInterval(loadStatus, 10000);

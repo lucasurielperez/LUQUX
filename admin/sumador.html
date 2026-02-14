@@ -72,10 +72,10 @@
 
   <button id="playBtn" class="plus" disabled>+</button>
 
+  <script src="player_context.js"></script>
   <script>
     const API = 'api.php';
     const WELCOME_PAGE = '../index.html';
-    const playerId = Number(localStorage.getItem('player_id') || 0);
     const TOTAL_MS = 20000;
 
     const startBtn = document.getElementById('startBtn');
@@ -99,6 +99,8 @@
     let countdownTimer = null;
     let symbolTimer = null;
     let playerAvailable = false;
+    let activePlayerId = 0;
+    let activePlayerToken = '';
 
     function setStatus(msg) {
       statusEl.textContent = msg;
@@ -117,15 +119,33 @@
       return data;
     }
 
+    function authPayload() {
+      if (activePlayerToken) {
+        return { player_token: activePlayerToken };
+      }
+      return { player_id: activePlayerId };
+    }
+
+    async function ensurePlayer() {
+      try {
+        const player = await window.PlayerContext.ensureActivePlayerForThisDevice();
+        activePlayerId = Number(player.id || localStorage.getItem('player_id') || 0);
+        activePlayerToken = String(player.player_token || localStorage.getItem('player_token') || '');
+      } catch (err) {
+        setStatus(err.message || 'No hay jugador activo.');
+        location.href = WELCOME_PAGE;
+      }
+    }
+
     async function fetchPlayerInfo() {
-      if (playerId <= 0) {
+      if (activePlayerId <= 0 && !activePlayerToken) {
         location.href = WELCOME_PAGE;
         return;
       }
 
       try {
         const data = await call('player_info', {
-          player_id: playerId,
+          ...authPayload(),
         });
 
         playerNameEl.textContent = data.display_name || 'Sin nombre';
@@ -177,7 +197,7 @@
 
       try {
         await call('sumador_finish', {
-          player_id: playerId,
+          ...authPayload(),
           score,
           clicks,
           duration_ms: realDurationMs,
@@ -220,7 +240,7 @@
         return;
       }
 
-      if (playerId <= 0) {
+      if (activePlayerId <= 0 && !activePlayerToken) {
         location.href = WELCOME_PAGE;
         return;
       }
@@ -230,7 +250,7 @@
 
       try {
         await call('sumador_start', {
-          player_id: playerId,
+          ...authPayload(),
         });
       } catch (err) {
         if (String(err.message).includes('Ya jugaste este juego')) {
@@ -254,7 +274,10 @@
     });
 
     startBtn.disabled = true;
-    fetchPlayerInfo();
+    (async function init() {
+      await ensurePlayer();
+      await fetchPlayerInfo();
+    })();
   </script>
 </body>
 </html>
