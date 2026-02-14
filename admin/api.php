@@ -77,30 +77,30 @@ function find_player_by_token(PDO $pdo, string $playerToken): ?array {
 }
 
 function resolve_player_id(PDO $pdo, array $payload): int {
+  $playerId = (int) ($payload['player_id'] ?? 0);
+  if ($playerId > 0) {
+    if (!player_exists($pdo, $playerId)) {
+      fail('player_id requerido o token inválido', 401, 'PLAYER_REQUIRED');
+    }
+
+    return $playerId;
+  }
+
   $token = trim((string) ($payload['player_token'] ?? ''));
   if ($token !== '') {
     if (strlen($token) < 24) {
-      fail('player_token inválido', 422, 'INVALID_PLAYER_TOKEN');
+      fail('player_id requerido o token inválido', 401, 'PLAYER_REQUIRED');
     }
 
     $player = find_player_by_token($pdo, $token);
     if (!$player) {
-      fail('Jugador inválido', 404, 'PLAYER_NOT_FOUND');
+      fail('player_id requerido o token inválido', 401, 'PLAYER_REQUIRED');
     }
 
     return (int) $player['id'];
   }
 
-  $playerId = (int) ($payload['player_id'] ?? 0);
-  if ($playerId <= 0) {
-    fail('player_token o player_id requerido', 422, 'PLAYER_REQUIRED');
-  }
-
-  if (!player_exists($pdo, $playerId)) {
-    fail('Jugador inválido', 404, 'PLAYER_NOT_FOUND');
-  }
-
-  return $playerId;
+  fail('player_id requerido o token inválido', 401, 'PLAYER_REQUIRED');
 }
 
 function resolve_player_id_from_body(PDO $pdo, array $payload): int {
@@ -114,7 +114,7 @@ function resolve_game_mode(array $payload): string {
   }
 
   if ($modeRaw !== 'practice' && $modeRaw !== 'real') {
-    fail('mode inválido', 422, 'INVALID_MODE');
+    fail('mode inválido', 400, 'BAD_MODE');
   }
 
   return $modeRaw;
@@ -138,6 +138,19 @@ function can_play(PDO $pdo, int $playerId, int $gameId, string $mode): bool {
   }
 
   return !has_real_play($pdo, $playerId, $gameId);
+}
+
+function is_debug_mode(array $config): bool {
+  if (array_key_exists('debug', $config)) {
+    return (bool) $config['debug'];
+  }
+
+  $envDebug = getenv('DEBUG');
+  if ($envDebug !== false) {
+    return in_array(strtolower((string) $envDebug), ['1', 'true', 'yes', 'on'], true);
+  }
+
+  return false;
 }
 
 function start_play(PDO $pdo, int $playerId, int $gameId, string $mode): int {
@@ -751,8 +764,8 @@ try {
 
   if ($method === 'POST' && $action === 'sumador_start') {
     $b = body_json();
-    $playerId = resolve_player_id_from_body($pdo, $b);
     $mode = resolve_game_mode($b);
+    $playerId = resolve_player_id_from_body($pdo, $b);
 
     if ($mode === 'real') {
       $enabled = setting_get($pdo, 'scoring_enabled', '1');
@@ -767,7 +780,7 @@ try {
     }
 
     if (!can_play($pdo, $playerId, $game['id'], $mode)) {
-      fail('Ya jugaste este juego (modo real).', 409, 'REAL_MODE_ALREADY_PLAYED');
+      fail('Ya jugaste en modo real', 409, 'ALREADY_PLAYED_REAL');
     }
 
     start_play($pdo, $playerId, $game['id'], $mode);
@@ -1098,7 +1111,15 @@ try {
   if ($pdo->inTransaction()) {
     $pdo->rollBack();
   }
-  fail('Database error', 500);
+  $sqlState = (string) ($e->errorInfo[0] ?? $e->getCode() ?? 'UNKNOWN');
+  error_log(sprintf('api.php action=%s SQLSTATE=%s message=%s', (string) $action, $sqlState, $e->getMessage()));
+
+  $extra = [];
+  if (is_debug_mode($config)) {
+    $extra['debug_sqlstate'] = $sqlState;
+  }
+
+  fail('Database error', 500, 'DB_ERROR', $extra);
 } catch (Throwable $e) {
   if ($pdo->inTransaction()) {
     $pdo->rollBack();

@@ -135,6 +135,9 @@
     }
 
     function authPayload() {
+      if (activePlayerToken && activePlayerId > 0) {
+        return { player_id: activePlayerId, player_token: activePlayerToken };
+      }
       if (activePlayerToken) {
         return { player_token: activePlayerToken };
       }
@@ -305,7 +308,7 @@
           mode: gameMode,
         });
       } catch (err) {
-        if (String(err.message).includes('Ya jugaste este juego (modo real).')) {
+        if (String(err.message).toLowerCase().includes('modo real')) {
           sumadorPlayedReal = true;
           updateAvailabilityStatus();
         } else {
