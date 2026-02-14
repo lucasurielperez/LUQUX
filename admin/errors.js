@@ -1,4 +1,4 @@
-const API = 'api.php';
+const API = '../api.php';
 const POLL_MS = 5000;
 let timer = null;
 

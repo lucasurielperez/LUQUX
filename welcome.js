@@ -1,5 +1,5 @@
 (function () {
-  const API = 'admin/api.php';
+  const API = 'api.php';
   const STORAGE_KEYS = {
     deviceId: 'device_id',
     playerId: 'player_id',

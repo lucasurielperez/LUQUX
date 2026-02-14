@@ -1,4 +1,4 @@
-const API = 'api.php';
+const API = '../api.php';
 
 function token() {
   return localStorage.getItem('admin_token') || '';

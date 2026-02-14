@@ -4,7 +4,7 @@ header('Content-Type: application/json; charset=utf-8');
 $BASE_DIR = is_file(__DIR__ . '/config.php') ? __DIR__ : dirname(__DIR__);
 $GLOBALS['BASE_DIR'] = $BASE_DIR;
 
-require_once $BASE_DIR . '/error_logger.php';
+require_once __DIR__ . '/error_logger.php';
 
 $requestId = bin2hex(random_bytes(6));
 init_error_logging([
@@ -13,15 +13,10 @@ init_error_logging([
   'base_dir' => $BASE_DIR,
 ]);
 
-$configPath = is_file($BASE_DIR . '/config.php')
-  ? $BASE_DIR . '/config.php'
-  : $BASE_DIR . '/admin/config.php';
-$virusLibPath = is_file($BASE_DIR . '/virus_lib.php')
-  ? $BASE_DIR . '/virus_lib.php'
-  : $BASE_DIR . '/admin/virus_lib.php';
+$config = require_once __DIR__ . '/admin/config.php';
 
-$config = require $configPath;
-require_once $virusLibPath;
+require_once __DIR__ . '/admin/virus_lib.php';
+
 
 function body_json(): array {
   $raw = file_get_contents('php://input');
