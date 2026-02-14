@@ -38,10 +38,6 @@
     #playBtn.minus{background:#d0312d}
     #startBtn{padding:10px 16px}
     .danger{color:#9b1c1c}
-    .mode-toggle{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 4px}
-    .mode-btn{padding:8px 12px;border:1px solid #666;background:#fff;border-radius:8px;cursor:pointer}
-    .mode-btn.active{background:#1d4ed8;color:#fff;border-color:#1d4ed8}
-    .mode-hint{margin:6px 0 0}
   </style>
 </head>
 <body>
@@ -61,11 +57,7 @@
       <li><strong>-</strong> resta 1 punto.</li>
       <li>Podés hacer clicks ilimitados, pero si tocás mucho el <strong>-</strong>, vas a perder muchos puntos.</li>
     </ul>
-    <div class="mode-toggle">
-      <button id="modePracticeBtn" class="mode-btn" type="button">Modo Prueba (∞)</button>
-      <button id="modeRealBtn" class="mode-btn" type="button">Modo Real (1 vez)</button>
-    </div>
-    <p id="modeHint" class="mode-hint muted">Esto es práctica: no suma puntos al ranking.</p>
+    <p class="danger">Cada jugador puede jugar solo una vez.</p>
     <button id="startBtn">Comenzar</button>
     <span id="status" class="muted"></span>
   </div>
@@ -85,8 +77,6 @@
     const API = 'api.php';
     const WELCOME_PAGE = '../index.html';
     const TOTAL_MS = 20000;
-    const MODE_STORAGE_KEY = 'sumador_mode';
-    const GAME_CODE = 'sumador';
 
     const startBtn = document.getElementById('startBtn');
     const playBtn = document.getElementById('playBtn');
@@ -96,9 +86,6 @@
     const statusEl = document.getElementById('status');
     const playerNameEl = document.getElementById('playerName');
     const playerStatusEl = document.getElementById('playerStatus');
-    const modePracticeBtn = document.getElementById('modePracticeBtn');
-    const modeRealBtn = document.getElementById('modeRealBtn');
-    const modeHintEl = document.getElementById('modeHint');
 
     // Bloqueamos gestos que suelen romper la ráfaga de taps en iOS/Android
     // (doble tap zoom / selección accidental), sin depender de librerías externas.
@@ -112,10 +99,8 @@
     let countdownTimer = null;
     let symbolTimer = null;
     let playerAvailable = false;
-    let sumadorPlayedReal = false;
     let activePlayerId = 0;
     let activePlayerToken = '';
-    let gameMode = localStorage.getItem(MODE_STORAGE_KEY) === 'real' ? 'real' : 'practice';
 
     function setStatus(msg) {
       statusEl.textContent = msg;
@@ -141,42 +126,6 @@
       return { player_id: activePlayerId };
     }
 
-    function applyModeUI() {
-      modePracticeBtn.classList.toggle('active', gameMode === 'practice');
-      modeRealBtn.classList.toggle('active', gameMode === 'real');
-
-      if (gameMode === 'practice') {
-        modeHintEl.textContent = 'Esto es práctica: no suma puntos al ranking.';
-      } else {
-        modeHintEl.textContent = 'Esto suma para el ranking y es una sola vez.';
-      }
-
-      updateAvailabilityStatus();
-    }
-
-    function setGameMode(mode) {
-      gameMode = mode === 'real' ? 'real' : 'practice';
-      localStorage.setItem(MODE_STORAGE_KEY, gameMode);
-      applyModeUI();
-    }
-
-    function updateAvailabilityStatus() {
-      playerAvailable = gameMode === 'practice' ? true : !sumadorPlayedReal;
-      startBtn.disabled = !playerAvailable || running;
-
-      if (sumadorPlayedReal) {
-        playerStatusEl.textContent = 'Ya jugaste en modo real';
-      } else {
-        playerStatusEl.textContent = 'Disponible';
-      }
-
-      if (gameMode === 'real' && sumadorPlayedReal) {
-        setStatus('Ya jugaste en modo real. Podés cambiar a práctica y jugar igual.');
-      } else if (!running) {
-        setStatus('Listo para jugar.');
-      }
-    }
-
     async function ensurePlayer() {
       try {
         const player = await window.PlayerContext.ensureActivePlayerForThisDevice();
@@ -200,8 +149,15 @@
         });
 
         playerNameEl.textContent = data.display_name || 'Sin nombre';
-        sumadorPlayedReal = Boolean(data.sumador_played_real ?? data.sumador_played);
-        updateAvailabilityStatus();
+        playerStatusEl.textContent = data.status || (data.sumador_played ? 'Ya jugaste' : 'Disponible');
+        playerAvailable = !data.sumador_played;
+        startBtn.disabled = !playerAvailable;
+
+        if (!playerAvailable) {
+          setStatus('Ya jugaste este juego.');
+        } else {
+          setStatus('Listo para jugar.');
+        }
       } catch (err) {
         playerNameEl.textContent = 'No identificado';
         playerStatusEl.textContent = 'No disponible';
@@ -242,18 +198,11 @@
       try {
         await call('sumador_finish', {
           ...authPayload(),
-          mode: gameMode,
           score,
           clicks,
           duration_ms: realDurationMs,
         });
-        if (gameMode === 'practice') {
-          setStatus(`Práctica finalizada. Tu puntaje fue ${score} (no suma al ranking).`);
-        } else {
-          setStatus(`Juego finalizado. Puntaje final: ${score}. Resultado real registrado.`);
-          sumadorPlayedReal = true;
-        }
-        updateAvailabilityStatus();
+        setStatus(`Juego finalizado. Puntaje final: ${score}.`);
       } catch (err) {
         setStatus(`Error al guardar: ${err.message}`);
       }
@@ -300,14 +249,14 @@
       setStatus('Iniciando...');
 
       try {
-        await call(`${GAME_CODE}_start`, {
+        await call('sumador_start', {
           ...authPayload(),
-          mode: gameMode,
         });
       } catch (err) {
-        if (String(err.message).includes('Ya jugaste este juego (modo real).')) {
-          sumadorPlayedReal = true;
-          updateAvailabilityStatus();
+        if (String(err.message).includes('Ya jugaste este juego')) {
+          setStatus('Ya jugaste este juego.');
+          playerStatusEl.textContent = 'Ya jugaste';
+          playerAvailable = false;
         } else {
           setStatus(`No se pudo iniciar: ${err.message}`);
         }
@@ -324,12 +273,8 @@
       startLoop();
     });
 
-    modePracticeBtn.addEventListener('click', () => setGameMode('practice'));
-    modeRealBtn.addEventListener('click', () => setGameMode('real'));
-
     startBtn.disabled = true;
     (async function init() {
-      applyModeUI();
       await ensurePlayer();
       await fetchPlayerInfo();
     })();
