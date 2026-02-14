@@ -413,20 +413,28 @@ try {
 
   if ($method === 'POST' && $action === 'reset_player') {
     $b = body_json();
-    $playerId = (int) ($b['player_id'] ?? 0);
-    if ($playerId <= 0) {
-      fail('player_id requerido');
-    }
+    $playerId = resolve_player_id_from_body($pdo, $b);
 
     $pdo->beginTransaction();
     $st1 = $pdo->prepare('DELETE FROM score_events WHERE player_id = ?');
     $st1->execute([$playerId]);
+    $deletedScoreEvents = $st1->rowCount();
 
     $st2 = $pdo->prepare('DELETE FROM secret_qr_claims WHERE player_id = ?');
     $st2->execute([$playerId]);
+    $deletedQrClaims = $st2->rowCount();
+
+    $st3 = $pdo->prepare('DELETE FROM game_plays WHERE player_id = ?');
+    $st3->execute([$playerId]);
+    $deletedGamePlays = $st3->rowCount();
+
     $pdo->commit();
 
-    ok(['reset' => true]);
+    ok([
+      'deleted_score_events' => $deletedScoreEvents,
+      'deleted_qr_claims' => $deletedQrClaims,
+      'deleted_game_plays' => $deletedGamePlays,
+    ]);
   }
 
   if ($method === 'POST' && $action === 'adjust_points') {
