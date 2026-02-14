@@ -33,6 +33,81 @@ async function call(action, method = 'GET', body = null) {
 const el = (id) => document.getElementById(id);
 const rowsOrEmpty = (rows) => (Array.isArray(rows) ? rows : []);
 
+
+function toggleQrInputs() {
+  const type = el('qrType').value;
+  el('qrGame').style.display = type === 'game' ? '' : 'none';
+  el('qrPoints').style.display = type === 'secret' ? '' : 'none';
+}
+
+async function createQrs() {
+  const qr_type = el('qrType').value;
+  const payload = {
+    qr_type,
+    count: Number(el('qrCount').value || 1),
+    points_delta: Number(el('qrPoints').value || 0),
+    game_code: el('qrGame').value || '',
+  };
+
+  const result = await call('admin_qr_create', 'POST', payload);
+  const rows = rowsOrEmpty(result.rows);
+  const wrap = el('qrGenerated');
+  wrap.innerHTML = '';
+
+  rows.forEach((r) => {
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = `
+      <div><strong>${esc(r.code)}</strong></div>
+      <div class="muted" style="word-break:break-all">${esc(r.url)}</div>
+      <div class="qr-img" style="margin:8px 0"></div>
+      <button data-copy="${esc(r.url)}">Copiar link</button>
+    `;
+    wrap.appendChild(card);
+    // eslint-disable-next-line no-new
+    new QRCode(card.querySelector('.qr-img'), {
+      text: r.url,
+      width: 128,
+      height: 128,
+    });
+  });
+
+  wrap.querySelectorAll('button[data-copy]').forEach((btn) => {
+    btn.onclick = async () => {
+      await navigator.clipboard.writeText(btn.dataset.copy || '');
+      el('qrMsg').textContent = 'Link copiado';
+    };
+  });
+
+  el('qrMsg').textContent = `Generados: ${rows.length}`;
+  await loadQrList();
+}
+
+async function toggleQr(id, is_active) {
+  await call('admin_qr_toggle', 'POST', { id, is_active });
+  await loadQrList();
+}
+
+async function loadQrList() {
+  const { rows } = await call('admin_qr_list');
+  const items = rowsOrEmpty(rows);
+  const tb = el('qrList').querySelector('tbody');
+  tb.innerHTML = items.map((r) => `
+    <tr>
+      <td>${esc(r.created_at || '')}</td>
+      <td>${esc(r.code || '')}</td>
+      <td>${esc(r.qr_type || '')}</td>
+      <td>${r.qr_type === 'game' ? esc(r.game_code || '') : Number(r.points_delta || 0)}</td>
+      <td>${Number(r.is_active) === 1 ? '🟢' : '🔴'}</td>
+      <td><button data-qid="${r.id}" data-next="${Number(r.is_active) === 1 ? 0 : 1}">${Number(r.is_active) === 1 ? 'Desactivar' : 'Activar'}</button></td>
+    </tr>
+  `).join('');
+
+  tb.querySelectorAll('button[data-qid]').forEach((btn) => {
+    btn.onclick = () => toggleQr(Number(btn.dataset.qid), Number(btn.dataset.next) === 1).catch((e) => alert(e.message));
+  });
+}
+
 function esc(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;',
@@ -46,6 +121,9 @@ function esc(s) {
 async function loadGames() {
   const { rows } = await call('games');
   const items = rowsOrEmpty(rows);
+  const gameSelect = el('qrGame');
+  gameSelect.innerHTML = items.map((g) => `<option value="${esc(g.code || '')}">${esc(g.name || g.code || '')}</option>`).join('');
+
   const tb = el('games').querySelector('tbody');
   tb.innerHTML = items.map((g) => `
     <tr>
@@ -147,6 +225,7 @@ async function runPanelLoad() {
     loadGames(),
     refreshScoringStatus(),
     loadVirusLeaderboard(),
+    loadQrList(),
   ];
 
   const results = await Promise.allSettled(tasks);
@@ -189,6 +268,10 @@ document.addEventListener('DOMContentLoaded', () => {
       el('status').textContent = `Error: ${e.message}`;
     }
   };
+
+  el('qrType').onchange = () => toggleQrInputs();
+  el('qrCreate').onclick = () => createQrs().catch((e) => { el('qrMsg').textContent = `Error: ${e.message}`; });
+  toggleQrInputs();
 
   el('loadPlayers').onclick = () => loadPlayers().catch((e) => alert(e.message));
   el('loadLb').onclick = () => loadLeaderboard().catch((e) => alert(e.message));

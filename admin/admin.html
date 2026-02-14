@@ -41,6 +41,27 @@
     </div>
   </div>
 
+
+  <div class="card">
+    <h3>QRs</h3>
+    <div class="row">
+      <select id="qrType">
+        <option value="game">Acceso a juego</option>
+        <option value="secret">QR secreto (puntos)</option>
+      </select>
+      <select id="qrGame"></select>
+      <input id="qrPoints" type="number" value="10" placeholder="points_delta" style="width:140px">
+      <input id="qrCount" type="number" value="1" min="1" max="50" placeholder="cantidad" style="width:100px">
+      <button id="qrCreate">Generar</button>
+      <span id="qrMsg" class="muted"></span>
+    </div>
+    <div id="qrGenerated" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;margin-top:12px"></div>
+    <table id="qrList">
+      <thead><tr><th>Fecha</th><th>Code</th><th>Tipo</th><th>Juego/Puntos</th><th>Activo</th><th>Acción</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
   <div class="card">
     <h3>Juegos</h3>
     <table id="games">
@@ -126,6 +147,7 @@
     </div>
   </div>
 
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <script src="admin.js"></script>
 </body>
 </html>
