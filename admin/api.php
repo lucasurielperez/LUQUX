@@ -95,6 +95,19 @@ function resolve_player_id(PDO $pdo, array $payload): int {
   return $playerId;
 }
 
+function resolve_player_id_from_body(PDO $pdo, array $payload): int {
+  $playerId = (int) ($payload['player_id'] ?? 0);
+  if ($playerId <= 0) {
+    fail('player_id requerido', 422);
+  }
+
+  if (!player_exists($pdo, $playerId)) {
+    fail('Jugador inválido', 404);
+  }
+
+  return $playerId;
+}
+
 function get_or_create_sumador_game(PDO $pdo): array {
   $stmt = $pdo->prepare('SELECT id, is_active FROM games WHERE code = ? LIMIT 1');
   $stmt->execute(['sumador']);
@@ -462,7 +475,7 @@ try {
 
   if ($method === 'POST' && $action === 'sumador_start') {
     $b = body_json();
-    $playerId = resolve_player_id($pdo, $b);
+    $playerId = resolve_player_id_from_body($pdo, $b);
 
     $enabled = setting_get($pdo, 'scoring_enabled', '1');
     if ($enabled !== '1') {
@@ -492,7 +505,7 @@ try {
 
   if ($method === 'POST' && $action === 'sumador_finish') {
     $b = body_json();
-    $playerId = resolve_player_id($pdo, $b);
+    $playerId = resolve_player_id_from_body($pdo, $b);
     $score = (int) ($b['score'] ?? 0);
     $clicks = (int) ($b['clicks'] ?? 0);
     $durationMs = (int) ($b['duration_ms'] ?? 0);
