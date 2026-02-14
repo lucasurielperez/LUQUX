@@ -2,6 +2,7 @@
 header('Content-Type: application/json; charset=utf-8');
 
 $config = require __DIR__ . '/config.php';
+require_once __DIR__ . '/virus_lib.php';
 
 function body_json(): array {
   $raw = file_get_contents('php://input');
@@ -129,6 +130,77 @@ function get_or_create_sumador_game(PDO $pdo): array {
   ];
 }
 
+function virus_secret(array $config): string {
+  $secret = (string) ($config['virus_qr_secret'] ?? $config['admin_token'] ?? 'virus-secret');
+  if (strlen($secret) < 16) {
+    $secret .= '-virus-fallback-secret';
+  }
+  return $secret;
+}
+
+function virus_get_active_session(PDO $pdo): ?array {
+  $stmt = $pdo->query('SELECT id, is_active, started_at, ended_at, leaderboard_snapshot_json FROM virus_sessions WHERE is_active = 1 ORDER BY id DESC LIMIT 1');
+  $row = $stmt->fetch();
+  return $row ?: null;
+}
+
+function virus_get_last_session(PDO $pdo): ?array {
+  $stmt = $pdo->query('SELECT id, is_active, started_at, ended_at, leaderboard_snapshot_json FROM virus_sessions ORDER BY id DESC LIMIT 1');
+  $row = $stmt->fetch();
+  return $row ?: null;
+}
+
+function virus_compute_leaderboard(PDO $pdo, int $sessionId): array {
+  $stmt = $pdo->prepare(
+    'SELECT vps.player_id, p.display_name, p.public_code, vps.role, vps.power, vps.updated_at,
+            COALESCE(stats.matches, 0) AS matches
+     FROM virus_player_state vps
+     INNER JOIN players p ON p.id = vps.player_id
+     LEFT JOIN (
+       SELECT player_id, COUNT(*) AS matches
+       FROM (
+         SELECT player_a AS player_id FROM virus_interactions WHERE session_id = ?
+         UNION ALL
+         SELECT player_b AS player_id FROM virus_interactions WHERE session_id = ?
+       ) z
+       GROUP BY player_id
+     ) stats ON stats.player_id = vps.player_id
+     WHERE vps.session_id = ?
+     ORDER BY vps.power DESC, vps.updated_at ASC, vps.player_id ASC'
+  );
+  $stmt->execute([$sessionId, $sessionId, $sessionId]);
+  return $stmt->fetchAll();
+}
+
+function virus_start_session(PDO $pdo): array {
+  $playersStmt = $pdo->query('SELECT id FROM players WHERE is_active = 1 ORDER BY id ASC');
+  $playerIds = array_map('intval', array_column($playersStmt->fetchAll(), 'id'));
+
+  if (count($playerIds) < 2) {
+    fail('Se necesitan al menos 2 jugadores activos para iniciar Virus', 422);
+  }
+
+  $pdo->beginTransaction();
+  $close = $pdo->prepare('UPDATE virus_sessions SET is_active = 0, ended_at = NOW() WHERE is_active = 1');
+  $close->execute();
+
+  $create = $pdo->prepare('INSERT INTO virus_sessions (is_active, started_at) VALUES (1, NOW())');
+  $create->execute();
+  $sessionId = (int) $pdo->lastInsertId();
+
+  $roles = virus_assign_roles($playerIds);
+  $ins = $pdo->prepare('INSERT INTO virus_player_state (session_id, player_id, role, power) VALUES (?, ?, ?, 1)');
+  foreach ($playerIds as $playerId) {
+    $ins->execute([$sessionId, $playerId, $roles[$playerId]]);
+  }
+
+  $pdo->commit();
+  return [
+    'session_id' => $sessionId,
+    'players_count' => count($playerIds),
+  ];
+}
+
 function validate_display_name(string $displayName): string {
   $name = trim($displayName);
   $len = mb_strlen($name, 'UTF-8');
@@ -176,6 +248,9 @@ $publicActions = [
   'player_register',
   'player_me',
   'player_rename',
+  'virus_status',
+  'virus_my_qr',
+  'virus_scan',
 ];
 
 if (!in_array($action, $publicActions, true)) {
@@ -266,7 +341,7 @@ try {
     $displayName = validate_display_name((string) ($b['display_name'] ?? ''));
     $deviceId = validate_device_id((string) ($b['device_id'] ?? ''));
 
-    $find = $pdo->prepare('SELECT id, display_name, public_code FROM players WHERE device_fingerprint = ? LIMIT 1');
+    $find = $pdo->prepare('SELECT id, display_name, public_code, player_token FROM players WHERE device_fingerprint = ? LIMIT 1');
     $find->execute([$deviceId]);
     $existing = $find->fetch();
 
@@ -279,6 +354,7 @@ try {
           'id' => (int) $existing['id'],
           'display_name' => $displayName,
           'public_code' => (string) $existing['public_code'],
+          'player_token' => (string) $existing['player_token'],
         ],
       ]);
     }
@@ -286,14 +362,16 @@ try {
     $created = null;
     for ($attempt = 0; $attempt < 10; $attempt++) {
       $publicCode = generate_public_code($pdo, 8);
-      $ins = $pdo->prepare('INSERT INTO players (display_name, device_fingerprint, public_code, last_seen_at) VALUES (?, ?, ?, NOW())');
+      $playerToken = strtolower(hash('sha256', random_bytes(32)));
+      $ins = $pdo->prepare('INSERT INTO players (display_name, device_fingerprint, public_code, player_token, last_seen_at) VALUES (?, ?, ?, ?, NOW())');
 
       try {
-        $ins->execute([$displayName, $deviceId, $publicCode]);
+        $ins->execute([$displayName, $deviceId, $publicCode, $playerToken]);
         $created = [
           'id' => (int) $pdo->lastInsertId(),
           'display_name' => $displayName,
           'public_code' => $publicCode,
+          'player_token' => $playerToken,
         ];
         break;
       } catch (PDOException $e) {
@@ -313,7 +391,7 @@ try {
   if ($method === 'GET' && $action === 'player_me') {
     $deviceId = validate_device_id((string) ($_GET['device_id'] ?? ''));
 
-    $stmt = $pdo->prepare('SELECT id, display_name, public_code FROM players WHERE device_fingerprint = ? LIMIT 1');
+    $stmt = $pdo->prepare('SELECT id, display_name, public_code, player_token FROM players WHERE device_fingerprint = ? LIMIT 1');
     $stmt->execute([$deviceId]);
     $player = $stmt->fetch();
 
@@ -325,6 +403,7 @@ try {
           'id' => (int) $player['id'],
           'display_name' => (string) $player['display_name'],
           'public_code' => (string) $player['public_code'],
+          'player_token' => (string) $player['player_token'],
         ],
       ]);
     }
@@ -342,7 +421,7 @@ try {
       fail('player_id requerido', 422);
     }
 
-    $stmt = $pdo->prepare('SELECT id, public_code FROM players WHERE id = ? AND device_fingerprint = ? LIMIT 1');
+    $stmt = $pdo->prepare('SELECT id, public_code, player_token FROM players WHERE id = ? AND device_fingerprint = ? LIMIT 1');
     $stmt->execute([$playerId, $deviceId]);
     $player = $stmt->fetch();
 
@@ -358,6 +437,7 @@ try {
         'id' => $playerId,
         'display_name' => $displayName,
         'public_code' => (string) $player['public_code'],
+        'player_token' => (string) $player['player_token'],
       ],
     ]);
   }
@@ -428,12 +508,22 @@ try {
     $st3->execute([$playerId]);
     $deletedGamePlays = $st3->rowCount();
 
+    $st4 = $pdo->prepare('DELETE FROM virus_player_state WHERE player_id = ?');
+    $st4->execute([$playerId]);
+    $deletedVirusStates = $st4->rowCount();
+
+    $st5 = $pdo->prepare('DELETE FROM virus_interactions WHERE player_a = ? OR player_b = ?');
+    $st5->execute([$playerId, $playerId]);
+    $deletedVirusInteractions = $st5->rowCount();
+
     $pdo->commit();
 
     ok([
       'deleted_score_events' => $deletedScoreEvents,
       'deleted_qr_claims' => $deletedQrClaims,
       'deleted_game_plays' => $deletedGamePlays,
+      'deleted_virus_states' => $deletedVirusStates,
+      'deleted_virus_interactions' => $deletedVirusInteractions,
     ]);
   }
 
@@ -562,6 +652,237 @@ try {
       'clicks' => $clicks,
       'duration_ms' => $durationMs,
     ]);
+  }
+
+
+  if (($method === 'GET' || $method === 'POST') && $action === 'virus_status') {
+    $payload = ($method === 'POST') ? body_json() : $_GET;
+    $playerId = resolve_player_id($pdo, $payload);
+    $session = virus_get_active_session($pdo);
+
+    if (!$session) {
+      $last = virus_get_last_session($pdo);
+      ok([
+        'is_active' => false,
+        'session_id' => $last ? (int) $last['id'] : null,
+        'my_power' => null,
+        'my_role' => null,
+        'opponents_pending' => [],
+        'interacted_count' => 0,
+        'total_opponents' => 0,
+      ]);
+    }
+
+    $sessionId = (int) $session['id'];
+    $meStmt = $pdo->prepare('SELECT player_id, role, power FROM virus_player_state WHERE session_id = ? AND player_id = ? LIMIT 1');
+    $meStmt->execute([$sessionId, $playerId]);
+    $me = $meStmt->fetch();
+
+    if (!$me) {
+      ok([
+        'is_active' => true,
+        'session_id' => $sessionId,
+        'my_power' => null,
+        'my_role' => null,
+        'opponents_pending' => [],
+        'interacted_count' => 0,
+        'total_opponents' => 0,
+      ]);
+    }
+
+    $oppStmt = $pdo->prepare(
+      'SELECT p.id, p.display_name
+       FROM virus_player_state vps
+       INNER JOIN players p ON p.id = vps.player_id
+       LEFT JOIN virus_interactions vi
+         ON vi.session_id = vps.session_id
+        AND ((vi.player_a = ? AND vi.player_b = vps.player_id)
+          OR (vi.player_b = ? AND vi.player_a = vps.player_id))
+       WHERE vps.session_id = ?
+         AND vps.player_id <> ?
+         AND vi.id IS NULL
+       ORDER BY p.display_name ASC, p.id ASC'
+    );
+    $oppStmt->execute([$playerId, $playerId, $sessionId, $playerId]);
+    $pending = $oppStmt->fetchAll();
+
+    $countStmt = $pdo->prepare('SELECT COUNT(*) FROM virus_interactions WHERE session_id = ? AND (player_a = ? OR player_b = ?)');
+    $countStmt->execute([$sessionId, $playerId, $playerId]);
+    $interacted = (int) $countStmt->fetchColumn();
+
+    $totalStmt = $pdo->prepare('SELECT GREATEST(COUNT(*) - 1, 0) FROM virus_player_state WHERE session_id = ?');
+    $totalStmt->execute([$sessionId]);
+    $totalOpp = (int) $totalStmt->fetchColumn();
+
+    ok([
+      'is_active' => true,
+      'session_id' => $sessionId,
+      'my_power' => (int) $me['power'],
+      'my_role' => null,
+      'opponents_pending' => array_map(fn($r) => [
+        'id' => (int) $r['id'],
+        'display_name' => (string) $r['display_name'],
+      ], $pending),
+      'interacted_count' => $interacted,
+      'total_opponents' => $totalOpp,
+    ]);
+  }
+
+  if (($method === 'GET' || $method === 'POST') && $action === 'virus_my_qr') {
+    $payload = ($method === 'POST') ? body_json() : $_GET;
+    $playerId = resolve_player_id($pdo, $payload);
+    $session = virus_get_active_session($pdo);
+
+    if (!$session) {
+      fail('Juego Virus inactivo', 403);
+    }
+
+    $sessionId = (int) $session['id'];
+    $stateStmt = $pdo->prepare('SELECT player_id FROM virus_player_state WHERE session_id = ? AND player_id = ? LIMIT 1');
+    $stateStmt->execute([$sessionId, $playerId]);
+    if (!$stateStmt->fetch()) {
+      fail('Jugador no participa de la sesión activa', 403);
+    }
+
+    $tokenPayload = [
+      'session_id' => $sessionId,
+      'player_id' => $playerId,
+      'nonce' => bin2hex(random_bytes(8)),
+      'exp' => time() + 86400,
+    ];
+
+    $qrPayload = virus_sign_payload($tokenPayload, virus_secret($config));
+    ok(['session_id' => $sessionId, 'qr_payload' => $qrPayload]);
+  }
+
+  if ($method === 'POST' && $action === 'virus_scan') {
+    $b = body_json();
+    $playerId = resolve_player_id($pdo, $b);
+    $qrPayload = trim((string) ($b['qr_payload_string'] ?? ''));
+    if ($qrPayload === '') {
+      fail('qr_payload_string requerido', 422);
+    }
+
+    $session = virus_get_active_session($pdo);
+    if (!$session) {
+      fail('Juego Virus inactivo', 403);
+    }
+
+    $sessionId = (int) $session['id'];
+    try {
+      $parsed = virus_verify_payload_string($qrPayload, virus_secret($config));
+    } catch (InvalidArgumentException $e) {
+      fail($e->getMessage(), 422);
+    }
+
+    if ((int) $parsed['session_id'] !== $sessionId) {
+      fail('QR de otra sesión', 409);
+    }
+
+    $otherId = (int) $parsed['player_id'];
+    if ($otherId === $playerId) {
+      fail('No podés enfrentarte a vos mismo', 422);
+    }
+
+    [$a, $bId] = virus_pair_ids($playerId, $otherId);
+
+    $pdo->beginTransaction();
+
+    $insInt = $pdo->prepare('INSERT INTO virus_interactions (session_id, player_a, player_b) VALUES (?, ?, ?)');
+    try {
+      $insInt->execute([$sessionId, $a, $bId]);
+    } catch (PDOException $e) {
+      if ((string) $e->getCode() === '23000') {
+        $pdo->rollBack();
+        fail('Ya interactuaste con este jugador en esta sesión', 409);
+      }
+      throw $e;
+    }
+
+    $stateStmt = $pdo->prepare('SELECT player_id, role, power FROM virus_player_state WHERE session_id = ? AND player_id IN (?, ?) ORDER BY player_id ASC FOR UPDATE');
+    $stateStmt->execute([$sessionId, $playerId, $otherId]);
+    $states = $stateStmt->fetchAll();
+
+    if (count($states) !== 2) {
+      $pdo->rollBack();
+      fail('Estados de jugadores no disponibles', 409);
+    }
+
+    $byPlayer = [];
+    foreach ($states as $row) {
+      $byPlayer[(int) $row['player_id']] = [
+        'player_id' => (int) $row['player_id'],
+        'role' => (string) $row['role'],
+        'power' => (int) $row['power'],
+      ];
+    }
+
+    $combat = virus_resolve_combat($byPlayer[$playerId], $byPlayer[$otherId]);
+
+    $up = $pdo->prepare('UPDATE virus_player_state SET power = ?, updated_at = NOW() WHERE session_id = ? AND player_id = ?');
+    $up->execute([(int) $combat['post_state']['me']['power'], $sessionId, $playerId]);
+    $up->execute([(int) $combat['post_state']['other']['power'], $sessionId, $otherId]);
+
+    $pdo->commit();
+
+    ok([
+      'session_id' => $sessionId,
+      'pre_state' => $combat['pre_state'],
+      'post_state' => $combat['post_state'],
+      'message' => $combat['message'],
+    ]);
+  }
+
+  if ($method === 'POST' && $action === 'admin_virus_toggle') {
+    $b = body_json();
+    $enabled = !empty($b['enabled']);
+
+    if ($enabled) {
+      $started = virus_start_session($pdo);
+      ok(['enabled' => true] + $started);
+    }
+
+    $active = virus_get_active_session($pdo);
+    if (!$active) {
+      ok(['enabled' => false, 'session_id' => null]);
+    }
+
+    $sessionId = (int) $active['id'];
+    $snapshot = virus_compute_leaderboard($pdo, $sessionId);
+    $snapshotJson = json_encode($snapshot, JSON_UNESCAPED_UNICODE);
+
+    $pdo->beginTransaction();
+    $up = $pdo->prepare('UPDATE virus_sessions SET is_active = 0, ended_at = NOW(), leaderboard_snapshot_json = ? WHERE id = ?');
+    $up->execute([$snapshotJson, $sessionId]);
+    $pdo->commit();
+
+    ok(['enabled' => false, 'session_id' => $sessionId]);
+  }
+
+  if ($method === 'POST' && $action === 'admin_virus_reset_session') {
+    $started = virus_start_session($pdo);
+    ok($started);
+  }
+
+  if ($method === 'GET' && $action === 'admin_virus_leaderboard') {
+    $active = virus_get_active_session($pdo);
+
+    if ($active) {
+      $rows = virus_compute_leaderboard($pdo, (int) $active['id']);
+      ok(['is_active' => true, 'session_id' => (int) $active['id'], 'rows' => $rows]);
+    }
+
+    $last = virus_get_last_session($pdo);
+    if (!$last) {
+      ok(['is_active' => false, 'session_id' => null, 'rows' => []]);
+    }
+
+    $snapshot = json_decode((string) ($last['leaderboard_snapshot_json'] ?? '[]'), true);
+    if (!is_array($snapshot)) {
+      $snapshot = [];
+    }
+
+    ok(['is_active' => false, 'session_id' => (int) $last['id'], 'rows' => $snapshot]);
   }
 
   fail('Not found', 404);

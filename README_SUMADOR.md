@@ -33,3 +33,37 @@
 5. Verificar que redirige a `admin/sumador.html?player_id=...`.
 6. Volver a `index.html` y refrescar: debe reconocer el mismo dispositivo y mostrar "Hola <nombre>".
 7. Ir a `admin/admin.html` y revisar leaderboard/eventos.
+
+## Juego Virus 🦠
+
+### Migración de base
+Ejecutar también:
+- `sql/virus_game.sql`
+
+### Configuración
+En `admin/config.php` configurar:
+- `virus_qr_secret`: secreto largo para firma HMAC de QR.
+
+### Flujo admin
+- `admin/admin.html`:
+  - **Encender Virus**: crea sesión nueva, asigna roles 50/50, resetea power=1.
+  - **Apagar Virus**: cierra sesión y guarda snapshot congelado de leaderboard.
+  - **Reset virus session**: reinicia sesión para pruebas.
+
+### Flujo jugador
+- `index.html` redirige a `admin/virus.html`.
+- En `admin/virus.html` el jugador puede:
+  - mostrar su QR firmado,
+  - escanear QR de otro,
+  - ver oponentes pendientes.
+- Después de cada escaneo válido se muestra un overlay de 1 segundo con roles, power pre/post y resultado.
+
+### Endpoints Virus (action en `admin/api.php`)
+- Jugador:
+  - `virus_status`
+  - `virus_my_qr`
+  - `virus_scan`
+- Admin:
+  - `admin_virus_toggle`
+  - `admin_virus_reset_session`
+  - `admin_virus_leaderboard`
