@@ -141,6 +141,23 @@ async function refreshScoringStatus() {
   el('btnScoringToggle').textContent = scoringEnabled ? 'Pausar puntaje (ON)' : 'Reanudar puntaje (OFF)';
 }
 
+
+async function runPanelLoad() {
+  const tasks = [
+    loadGames(),
+    refreshScoringStatus(),
+    loadVirusLeaderboard(),
+  ];
+
+  const results = await Promise.allSettled(tasks);
+  const firstError = results.find((r) => r.status === 'rejected');
+  if (firstError) {
+    el('status').textContent = `Error: ${firstError.reason?.message || 'No se pudo cargar el panel'}`;
+  } else {
+    el('status').textContent = 'panel cargado';
+  }
+}
+
 async function loadLeaderboard() {
   const { rows } = await call('leaderboard');
   const items = rowsOrEmpty(rows);
@@ -167,9 +184,7 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       const r = await call('ping');
       el('status').textContent = r.msg || 'pong';
-      await loadGames();
-      await refreshScoringStatus();
-      await loadVirusLeaderboard();
+      await runPanelLoad();
     } catch (e) {
       el('status').textContent = `Error: ${e.message}`;
     }
@@ -238,6 +253,8 @@ document.addEventListener('DOMContentLoaded', () => {
       el('virusMsg').textContent = `Error: ${e.message}`;
     }
   };
+
+  runPanelLoad();
 
   el('btnScoringToggle').onclick = async () => {
     try {
