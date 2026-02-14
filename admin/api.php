@@ -498,7 +498,7 @@ try {
     }
 
     ok([
-      'duration_ms' => 10000,
+      'duration_ms' => 20000,
       'game_id' => $game['id'],
     ]);
   }
@@ -510,13 +510,13 @@ try {
     $clicks = (int) ($b['clicks'] ?? 0);
     $durationMs = (int) ($b['duration_ms'] ?? 0);
 
-    if ($durationMs < 8000 || $durationMs > 12000) {
+    if ($durationMs < 18000 || $durationMs > 22000) {
       fail('duration_ms inválido');
     }
     if ($clicks < 0 || $clicks > 2000) {
       fail('clicks inválido');
     }
-    if ($score < -2000 || $score > 2000) {
+    if ($score < -4000 || $score > 4000) {
       fail('score inválido');
     }
 
