@@ -2,15 +2,40 @@
 <html lang="es-AR">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Juego 1: Sumador</title>
   <style>
-    body{font-family:system-ui,Arial;margin:18px;max-width:800px}
+    body{
+      font-family:system-ui,Arial;
+      margin:18px;
+      max-width:800px;
+      overscroll-behavior:none;
+      -webkit-user-select:none;
+      user-select:none;
+      -webkit-touch-callout:none;
+      touch-action:manipulation;
+    }
     .card{border:1px solid #ddd;border-radius:12px;padding:16px;margin:12px 0}
     .muted{opacity:.75}
     .timer{font-size:40px;font-weight:700;margin:8px 0}
     .score{font-size:30px;font-weight:700;margin:8px 0}
-    #playBtn{width:100%;max-width:520px;height:240px;font-size:120px;font-weight:700;border-radius:20px;border:2px solid #444;cursor:pointer}
+    #playBtn{
+      width:100%;
+      max-width:520px;
+      height:260px;
+      font-size:220px;
+      line-height:1;
+      font-weight:800;
+      border-radius:20px;
+      border:2px solid #233;
+      color:#fff;
+      cursor:pointer;
+      touch-action:manipulation;
+      -webkit-user-select:none;
+      user-select:none;
+    }
+    #playBtn.plus{background:#1f9d49}
+    #playBtn.minus{background:#d0312d}
     #startBtn{padding:10px 16px}
     .danger{color:#9b1c1c}
   </style>
@@ -25,10 +50,10 @@
   </div>
 
   <div class="card">
-    <p>Duración total: <strong>10 segundos</strong>.</p>
+    <p>Duración total: <strong>20 segundos</strong>.</p>
     <p>Un botón gigante alterna entre <strong>+</strong> y <strong>-</strong> en intervalos aleatorios (0.0 a 1.0s).</p>
     <ul>
-      <li><strong>+</strong> suma 1 punto.</li>
+      <li><strong>+</strong> suma 2 puntos.</li>
       <li><strong>-</strong> resta 1 punto.</li>
       <li>Podés hacer clicks ilimitados, pero si tocás mucho el <strong>-</strong>, vas a perder muchos puntos.</li>
     </ul>
@@ -39,19 +64,19 @@
 
   <div class="card">
     <div>Cuenta regresiva</div>
-    <div id="timer" class="timer">10.0</div>
+    <div id="timer" class="timer">20.0</div>
     <div>Puntaje</div>
     <div id="score" class="score">0</div>
     <div>Clicks: <span id="clicks">0</span></div>
   </div>
 
-  <button id="playBtn" disabled>+</button>
+  <button id="playBtn" class="plus" disabled>+</button>
 
   <script>
     const API = 'api.php';
     const WELCOME_PAGE = '../index.html';
     const playerId = Number(localStorage.getItem('player_id') || 0);
-    const TOTAL_MS = 10000;
+    const TOTAL_MS = 20000;
 
     const startBtn = document.getElementById('startBtn');
     const playBtn = document.getElementById('playBtn');
@@ -61,6 +86,11 @@
     const statusEl = document.getElementById('status');
     const playerNameEl = document.getElementById('playerName');
     const playerStatusEl = document.getElementById('playerStatus');
+
+    // Bloqueamos gestos que suelen romper la ráfaga de taps en iOS/Android
+    // (doble tap zoom / selección accidental), sin depender de librerías externas.
+    document.addEventListener('dblclick', (event) => event.preventDefault(), { passive: false });
+    document.addEventListener('gesturestart', (event) => event.preventDefault(), { passive: false });
 
     let score = 0;
     let clicks = 0;
@@ -118,7 +148,10 @@
 
     function nextSymbol() {
       if (!running) return;
-      playBtn.textContent = Math.random() < 0.5 ? '+' : '-';
+      const symbol = Math.random() < 0.5 ? '+' : '-';
+      playBtn.textContent = symbol;
+      playBtn.classList.toggle('plus', symbol === '+');
+      playBtn.classList.toggle('minus', symbol === '-');
       const nextMs = Math.floor(Math.random() * 1000);
       symbolTimer = setTimeout(nextSymbol, nextMs);
     }
@@ -171,10 +204,13 @@
       }, 50);
     }
 
-    playBtn.addEventListener('click', () => {
+    // En móviles usamos pointerdown para reducir latencia y evitar problemas de doble tap/click.
+    // preventDefault ayuda a suprimir selección/gestos no deseados durante taps rápidos.
+    playBtn.addEventListener('pointerdown', (event) => {
+      event.preventDefault();
       if (!running) return;
       clicks += 1;
-      score += (playBtn.textContent === '+') ? 1 : -1;
+      score += (playBtn.textContent === '+') ? 2 : -1;
       render();
     });
 
@@ -210,7 +246,8 @@
 
       score = 0;
       clicks = 0;
-      timerEl.textContent = '10.0';
+      timerEl.textContent = '20.0';
+      playBtn.classList.remove('plus', 'minus');
       render();
       setStatus('¡Jugando!');
       startLoop();
