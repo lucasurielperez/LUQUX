@@ -112,6 +112,27 @@ async function loadEvents() {
 
 let scoringEnabled = true;
 
+let virusActive = false;
+
+async function loadVirusLeaderboard() {
+  const { rows, is_active } = await call('admin_virus_leaderboard');
+  virusActive = !!is_active;
+  const items = rowsOrEmpty(rows);
+  const tb = el('virusLb').querySelector('tbody');
+  tb.innerHTML = items.map((r, i) => `
+    <tr>
+      <td>${i + 1}</td>
+      <td>${esc(r.display_name || '')}</td>
+      <td>${esc(r.public_code || '')}</td>
+      <td>${esc(r.role || '')}</td>
+      <td>${r.power ?? 0}</td>
+      <td>${r.matches ?? 0}</td>
+    </tr>
+  `).join('');
+  el('virusMsg').textContent = virusActive ? 'Virus activo' : 'Virus finalizado';
+  el('virusToggle').textContent = virusActive ? 'Apagar Virus' : 'Encender Virus';
+}
+
 async function refreshScoringStatus() {
   const r = await call('scoring_status');
   scoringEnabled = !!r.enabled;
@@ -148,6 +169,7 @@ document.addEventListener('DOMContentLoaded', () => {
       el('status').textContent = r.msg || 'pong';
       await loadGames();
       await refreshScoringStatus();
+      await loadVirusLeaderboard();
     } catch (e) {
       el('status').textContent = `Error: ${e.message}`;
     }
@@ -186,7 +208,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!player_id) return;
       if (!confirm(`Reset TOTAL de player_id=${player_id}? (borra puntajes, QRs y partidas para habilitar rejugar)`)) return;
       const result = await call('reset_player', 'POST', { player_id });
-      el('resetMsg').textContent = `ok · score_events=${result.deleted_score_events ?? 0}, qr_claims=${result.deleted_qr_claims ?? 0}, game_plays=${result.deleted_game_plays ?? 0}`;
+      el('resetMsg').textContent = `ok · score_events=${result.deleted_score_events ?? 0}, qr_claims=${result.deleted_qr_claims ?? 0}, game_plays=${result.deleted_game_plays ?? 0}, virus_states=${result.deleted_virus_states ?? 0}, virus_interactions=${result.deleted_virus_interactions ?? 0}`;
       await loadLeaderboard();
       await loadPlayers();
       await loadEvents();
@@ -195,10 +217,33 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   };
 
+
+  el('virusLbLoad').onclick = () => loadVirusLeaderboard().catch((e) => alert(e.message));
+
+  el('virusToggle').onclick = async () => {
+    try {
+      await call('admin_virus_toggle', 'POST', { enabled: !virusActive });
+      await loadVirusLeaderboard();
+    } catch (e) {
+      el('virusMsg').textContent = `Error: ${e.message}`;
+    }
+  };
+
+  el('virusReset').onclick = async () => {
+    try {
+      await call('admin_virus_reset_session', 'POST', {});
+      await loadVirusLeaderboard();
+      el('virusMsg').textContent = 'Sesión virus reiniciada';
+    } catch (e) {
+      el('virusMsg').textContent = `Error: ${e.message}`;
+    }
+  };
+
   el('btnScoringToggle').onclick = async () => {
     try {
       await call('set_scoring_enabled', 'POST', { enabled: !scoringEnabled });
       await refreshScoringStatus();
+      await loadVirusLeaderboard();
       el('scoringMsg').textContent = scoringEnabled ? 'puntaje activo' : 'puntaje pausado';
     } catch (e) {
       el('scoringMsg').textContent = `Error: ${e.message}`;

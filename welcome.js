@@ -5,6 +5,7 @@
     playerId: 'player_id',
     publicCode: 'public_code',
     displayName: 'display_name',
+    playerToken: 'player_token',
   };
 
   const newPlayerEl = document.getElementById('newPlayer');
@@ -75,6 +76,9 @@
     localStorage.setItem(STORAGE_KEYS.playerId, String(p.id));
     localStorage.setItem(STORAGE_KEYS.publicCode, String(p.public_code));
     localStorage.setItem(STORAGE_KEYS.displayName, String(p.display_name));
+    if (p.player_token) {
+      localStorage.setItem(STORAGE_KEYS.playerToken, String(p.player_token));
+    }
   }
 
   function showKnownPlayer(p) {
@@ -91,7 +95,7 @@
 
   function goToGame() {
     if (!player) return;
-    location.href = 'admin/sumador.html';
+location.href = 'admin/virus.html';
   }
 
   async function bootstrap() {
