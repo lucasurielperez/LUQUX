@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="es-AR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Bienvenida | Cumple de Lucas</title>
+  <style>
+    body { font-family: system-ui, Arial, sans-serif; margin: 0; background: #f6f0ff; color: #231942; }
+    main { max-width: 680px; margin: 0 auto; padding: 24px 16px 40px; }
+    .card { background: #fff; border-radius: 14px; padding: 18px; box-shadow: 0 8px 24px rgba(35, 25, 66, .08); margin-bottom: 14px; }
+    h1 { margin: 0 0 10px; }
+    p { margin: 8px 0; }
+    label { display: block; margin-bottom: 6px; font-weight: 600; }
+    input { width: 100%; padding: 12px; font-size: 16px; border: 1px solid #c8c2dc; border-radius: 10px; box-sizing: border-box; }
+    button { border: 0; border-radius: 10px; padding: 12px 14px; font-size: 16px; cursor: pointer; }
+    .primary { background: #5e35b1; color: #fff; width: 100%; }
+    .secondary { background: #ece4ff; color: #2f1b63; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+    .muted { opacity: .8; font-size: 14px; }
+    .hidden { display: none; }
+    #status { min-height: 22px; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="card">
+      <h1>Bienvenidos al cumple de 40 de Lucas 🎉</h1>
+      <p>Hoy vas a poder jugar mini juegos para sumar puntos, pero ojo: también podés perder puntos.</p>
+      <p class="muted">Registrate una vez por dispositivo y después podés continuar directo.</p>
+    </section>
+
+    <section id="newPlayer" class="card hidden">
+      <label for="displayName">Tu nombre</label>
+      <input id="displayName" type="text" maxlength="80" placeholder="Tu nombre" autocomplete="name" />
+      <div class="row">
+        <button id="startBtn" class="primary">Arrancar</button>
+      </div>
+    </section>
+
+    <section id="knownPlayer" class="card hidden">
+      <p>Hola <strong id="knownName">—</strong> 👋</p>
+      <div class="row">
+        <button id="continueBtn" class="primary">Continuar</button>
+        <button id="changeNameBtn" class="secondary">Cambiar nombre</button>
+      </div>
+      <div id="renameWrap" class="hidden" style="margin-top:12px;">
+        <label for="renameInput">Nuevo nombre</label>
+        <input id="renameInput" type="text" maxlength="80" placeholder="Tu nombre" />
+        <div class="row">
+          <button id="saveNameBtn" class="secondary">Guardar nombre</button>
+        </div>
+      </div>
+    </section>
+
+    <p id="status"></p>
+  </main>
+
+  <script src="welcome.js"></script>
+</body>
+</html>

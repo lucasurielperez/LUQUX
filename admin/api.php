@@ -116,9 +116,54 @@ function get_or_create_sumador_game(PDO $pdo): array {
   ];
 }
 
+function validate_display_name(string $displayName): string {
+  $name = trim($displayName);
+  $len = mb_strlen($name, 'UTF-8');
+  if ($len < 1 || $len > 80) {
+    fail('display_name inválido (1..80)', 422);
+  }
+  return $name;
+}
+
+function validate_device_id(string $deviceId): string {
+  $id = trim($deviceId);
+  if (strlen($id) < 12 || strlen($id) > 255) {
+    fail('device_id inválido', 422);
+  }
+  return $id;
+}
+
+function generate_public_code(PDO $pdo, int $length = 8): string {
+  $alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  $max = strlen($alphabet) - 1;
+
+  for ($attempt = 0; $attempt < 20; $attempt++) {
+    $code = '';
+    for ($i = 0; $i < $length; $i++) {
+      $code .= $alphabet[random_int(0, $max)];
+    }
+
+    $stmt = $pdo->prepare('SELECT id FROM players WHERE public_code = ? LIMIT 1');
+    $stmt->execute([$code]);
+    if (!$stmt->fetchColumn()) {
+      return $code;
+    }
+  }
+
+  fail('No se pudo generar public_code', 500);
+}
+
 $action = $_GET['action'] ?? '';
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
-$publicActions = ['sumador_start', 'sumador_finish', 'resolve_player', 'player_info'];
+$publicActions = [
+  'sumador_start',
+  'sumador_finish',
+  'resolve_player',
+  'player_info',
+  'player_register',
+  'player_me',
+  'player_rename',
+];
 
 if (!in_array($action, $publicActions, true)) {
   $token = auth_bearer_token();
@@ -200,6 +245,107 @@ try {
       'display_name' => (string) $player['display_name'],
       'sumador_played' => $alreadyPlayed,
       'status' => $alreadyPlayed ? 'Ya jugaste' : 'Disponible',
+    ]);
+  }
+
+  if ($method === 'POST' && $action === 'player_register') {
+    $b = body_json();
+    $displayName = validate_display_name((string) ($b['display_name'] ?? ''));
+    $deviceId = validate_device_id((string) ($b['device_id'] ?? ''));
+
+    $find = $pdo->prepare('SELECT id, display_name, public_code FROM players WHERE device_fingerprint = ? LIMIT 1');
+    $find->execute([$deviceId]);
+    $existing = $find->fetch();
+
+    if ($existing) {
+      $up = $pdo->prepare('UPDATE players SET display_name = ?, last_seen_at = NOW() WHERE id = ?');
+      $up->execute([$displayName, (int) $existing['id']]);
+
+      ok([
+        'player' => [
+          'id' => (int) $existing['id'],
+          'display_name' => $displayName,
+          'public_code' => (string) $existing['public_code'],
+        ],
+      ]);
+    }
+
+    $created = null;
+    for ($attempt = 0; $attempt < 10; $attempt++) {
+      $publicCode = generate_public_code($pdo, 8);
+      $ins = $pdo->prepare('INSERT INTO players (display_name, device_fingerprint, public_code, last_seen_at) VALUES (?, ?, ?, NOW())');
+
+      try {
+        $ins->execute([$displayName, $deviceId, $publicCode]);
+        $created = [
+          'id' => (int) $pdo->lastInsertId(),
+          'display_name' => $displayName,
+          'public_code' => $publicCode,
+        ];
+        break;
+      } catch (PDOException $e) {
+        if ((string) $e->getCode() !== '23000') {
+          throw $e;
+        }
+      }
+    }
+
+    if (!$created) {
+      fail('No se pudo registrar al jugador', 409);
+    }
+
+    ok(['player' => $created]);
+  }
+
+  if ($method === 'GET' && $action === 'player_me') {
+    $deviceId = validate_device_id((string) ($_GET['device_id'] ?? ''));
+
+    $stmt = $pdo->prepare('SELECT id, display_name, public_code FROM players WHERE device_fingerprint = ? LIMIT 1');
+    $stmt->execute([$deviceId]);
+    $player = $stmt->fetch();
+
+    if ($player) {
+      $touch = $pdo->prepare('UPDATE players SET last_seen_at = NOW() WHERE id = ?');
+      $touch->execute([(int) $player['id']]);
+      ok([
+        'player' => [
+          'id' => (int) $player['id'],
+          'display_name' => (string) $player['display_name'],
+          'public_code' => (string) $player['public_code'],
+        ],
+      ]);
+    }
+
+    ok(['player' => null]);
+  }
+
+  if ($method === 'POST' && $action === 'player_rename') {
+    $b = body_json();
+    $playerId = (int) ($b['player_id'] ?? 0);
+    $deviceId = validate_device_id((string) ($b['device_id'] ?? ''));
+    $displayName = validate_display_name((string) ($b['display_name'] ?? ''));
+
+    if ($playerId <= 0) {
+      fail('player_id requerido', 422);
+    }
+
+    $stmt = $pdo->prepare('SELECT id, public_code FROM players WHERE id = ? AND device_fingerprint = ? LIMIT 1');
+    $stmt->execute([$playerId, $deviceId]);
+    $player = $stmt->fetch();
+
+    if (!$player) {
+      fail('Jugador inválido', 403);
+    }
+
+    $up = $pdo->prepare('UPDATE players SET display_name = ?, last_seen_at = NOW() WHERE id = ?');
+    $up->execute([$displayName, $playerId]);
+
+    ok([
+      'player' => [
+        'id' => $playerId,
+        'display_name' => $displayName,
+        'public_code' => (string) $player['public_code'],
+      ],
     ]);
   }
 
