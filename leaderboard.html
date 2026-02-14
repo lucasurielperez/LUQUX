@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="es-AR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <title>Leaderboard Proyector</title>
+  <style>
+    :root {
+      --bg-1: #09122b;
+      --bg-2: #131f4d;
+      --txt: #ecf3ff;
+      --accent: #7da8ff;
+      --ok: #57ff8f;
+      --warn: #ffaf3f;
+      --other: #7ab0ff;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      font-family: "Inter", "Segoe UI", system-ui, Arial, sans-serif;
+      background: radial-gradient(circle at 20% 20%, #1d2f6f 0%, var(--bg-1) 45%),
+                  radial-gradient(circle at 80% 10%, #2e1f62 0%, var(--bg-2) 55%);
+      color: var(--txt);
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: -30%;
+      background:
+        radial-gradient(circle, rgba(100, 154, 255, 0.14) 0%, transparent 45%) 8% 20% / 30vmin 30vmin repeat,
+        radial-gradient(circle, rgba(126, 204, 255, 0.10) 0%, transparent 55%) 60% 70% / 36vmin 36vmin repeat;
+      animation: drift 20s linear infinite;
+      pointer-events: none;
+    }
+    @keyframes drift {
+      from { transform: translate3d(0, 0, 0); }
+      to { transform: translate3d(5%, -4%, 0); }
+    }
+
+    .screen {
+      height: 100%;
+      display: grid;
+      grid-template-rows: auto auto 1fr auto;
+      gap: 1.4vh;
+      padding: 2.2vh 2vw;
+      position: relative;
+      z-index: 1;
+    }
+    .title {
+      text-align: center;
+      margin: 0;
+      font-size: clamp(30px, 5vh, 64px);
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      text-shadow: 0 0 24px rgba(126, 204, 255, 0.45);
+    }
+    .sub {
+      text-align: center;
+      font-size: clamp(16px, 2.1vh, 30px);
+      color: #b9cdff;
+    }
+    .sub .updating { opacity: .85; color: #ffd682; }
+
+    .table-wrap {
+      border: 2px solid rgba(130, 162, 255, 0.5);
+      border-radius: 22px;
+      background: rgba(7, 16, 44, 0.8);
+      box-shadow: 0 14px 44px rgba(0, 0, 0, 0.45), inset 0 0 26px rgba(97, 140, 255, 0.16);
+      overflow: hidden;
+      height: 100%;
+    }
+    table {
+      width: 100%;
+      height: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+    thead th {
+      font-size: clamp(15px, 2vh, 24px);
+      color: #d7e4ff;
+      text-align: left;
+      padding: .8vh .9vw;
+      border-bottom: 1px solid rgba(151, 181, 255, 0.35);
+    }
+    tbody tr { border-bottom: 1px solid rgba(111, 141, 219, 0.22); }
+    tbody tr:last-child { border-bottom: none; }
+    tbody td {
+      padding: .46vh .9vw;
+      font-weight: 700;
+      line-height: 1.15;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-size: clamp(14px, 1.95vh, 27px);
+      color: #cbe0ff;
+    }
+    .col-arrow { width: 6%; text-align: center; }
+    .col-pos { width: 8%; }
+    .col-name { width: 31%; }
+    .col-points { width: 20%; text-align: right; }
+    .col-last { width: 35%; }
+
+    .rank-1 td {
+      font-size: clamp(20px, 2.75vh, 39px);
+      color: var(--ok);
+      text-shadow: 0 0 18px rgba(87, 255, 143, .35);
+      background: linear-gradient(90deg, rgba(57, 115, 75, .25), rgba(32, 66, 97, .12));
+    }
+    .rank-2 td, .rank-3 td {
+      font-size: clamp(18px, 2.4vh, 34px);
+      color: var(--warn);
+      background: linear-gradient(90deg, rgba(167, 102, 31, .22), rgba(65, 40, 86, .1));
+    }
+    .rank-other td {
+      color: var(--other);
+      font-size: clamp(14px, 1.9vh, 26px);
+    }
+    .note { font-size: .78em; opacity: .78; font-weight: 600; }
+    .footer {
+      display: flex;
+      justify-content: space-between;
+      font-size: clamp(13px, 1.7vh, 22px);
+      color: #a9bffc;
+    }
+    .error { color: #ff8f8f; }
+
+    .celebration {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: radial-gradient(circle at center, rgba(18, 33, 88, .7), rgba(8, 15, 35, .95));
+      z-index: 10;
+      overflow: hidden;
+    }
+    .celebration.show { display: flex; }
+    .celebration-card {
+      text-align: center;
+      padding: 2.5vh 3vw;
+      border: 3px solid rgba(255, 176, 70, .65);
+      border-radius: 22px;
+      background: rgba(15, 28, 75, .82);
+      box-shadow: 0 0 32px rgba(255, 168, 69, .45);
+    }
+    .celebration-top { font-size: clamp(26px, 4.8vh, 64px); font-weight: 900; }
+    .celebration-name { font-size: clamp(30px, 7.2vh, 94px); color: #ffcf68; font-weight: 900; }
+    .celebration-points { font-size: clamp(22px, 4vh, 54px); color: #8fffc0; }
+    .confetti-piece {
+      position: absolute;
+      width: 9px;
+      height: 16px;
+      border-radius: 3px;
+      animation: confetti-fall linear forwards;
+      opacity: .95;
+    }
+    @keyframes confetti-fall {
+      from { transform: translateY(-10vh) rotate(0deg); }
+      to { transform: translateY(110vh) rotate(540deg); }
+    }
+  </style>
+</head>
+<body>
+  <div class="screen">
+    <h1 class="title">🏆 LEADERBOARD</h1>
+    <div class="sub">Actualiza cada 60s · <span id="cycleTime">--:--:--</span><span id="updating" class="updating"></span></div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th class="col-arrow">Flecha</th>
+            <th class="col-pos">Posición</th>
+            <th class="col-name">Nombre del jugador</th>
+            <th class="col-points">Puntaje acumulado</th>
+            <th class="col-last">Último juego/acción</th>
+          </tr>
+        </thead>
+        <tbody id="lbBody"></tbody>
+      </table>
+    </div>
+
+    <div class="footer">
+      <span id="errorMsg"></span>
+      <span id="lastOk">Última actualización: --:--:--</span>
+    </div>
+  </div>
+
+  <div id="celebration" class="celebration" aria-hidden="true">
+    <div id="confettiLayer"></div>
+    <div class="celebration-card">
+      <div class="celebration-top" id="celebrationTop">🔥 SUBIÓ AL #1</div>
+      <div class="celebration-name" id="celebrationName">Jugador</div>
+      <div class="celebration-points" id="celebrationPoints">Puntaje: 0</div>
+    </div>
+  </div>
+
+  <script src="leaderboard.js"></script>
+</body>
+</html>
