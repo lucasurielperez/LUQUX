@@ -957,31 +957,62 @@ try {
     $qrStmt = $pdo->prepare('SELECT id, code, qr_type, game_code, points_delta, is_active FROM qr_codes WHERE code = ? LIMIT 1');
     $qrStmt->execute([$code]);
     $qr = $qrStmt->fetch();
-    if (!$qr || (int) $qr['is_active'] !== 1) {
-      fail('QR inválido o inactivo', 404, 'QR_NOT_FOUND');
+    if (!$qr) {
+      fail('QR no encontrado', 404, 'QR_NOT_FOUND');
+    }
+    if ((int) $qr['is_active'] !== 1) {
+      fail('QR inactivo', 403, 'QR_INACTIVE');
     }
 
-    $playerId = resolve_player_id($pdo, $payload);
     $qrId = (int) $qr['id'];
+    $qrType = (string) ($qr['qr_type'] ?? '');
 
-    $claimInsert = $pdo->prepare('INSERT INTO qr_claims (qr_id, player_id, applied_points) VALUES (?, ?, 0)');
-    try {
-      $claimInsert->execute([$qrId, $playerId]);
-    } catch (Throwable $e) {
-      if (is_unique_violation($e)) {
-        fail('Ya canjeaste este QR', 409, 'ALREADY_CLAIMED');
+    if ($qrType === 'game') {
+      $gameCode = (string) ($qr['game_code'] ?? '');
+      if ($gameCode === '') {
+        fail('Juego no encontrado', 404, 'GAME_NOT_FOUND');
       }
-      throw $e;
+
+      $gameStmt = $pdo->prepare('SELECT id, code, is_active FROM games WHERE code = ? LIMIT 1');
+      $gameStmt->execute([$gameCode]);
+      $game = $gameStmt->fetch();
+      if (!$game) {
+        fail('Juego no encontrado', 404, 'GAME_NOT_FOUND');
+      }
+      if ((int) $game['is_active'] !== 1) {
+        fail('Ese juego está apagado', 403, 'GAME_INACTIVE');
+      }
+
+      $redirectUrl = '../admin/' . rawurlencode($gameCode) . '.html';
+      if (isset($_SERVER['SCRIPT_NAME']) && str_contains((string) $_SERVER['SCRIPT_NAME'], '/admin/')) {
+        $redirectUrl = './' . rawurlencode($gameCode) . '.html';
+      }
+
+      ok([
+        'qr_type' => 'game',
+        'redirect_url' => $redirectUrl,
+        'message' => 'OK',
+      ]);
     }
 
-    $claimId = (int) $pdo->lastInsertId();
-
-    if ((string) $qr['qr_type'] === 'secret') {
+    if ($qrType === 'secret') {
+      $playerId = resolve_player_id($pdo, $payload);
       $enabled = setting_get($pdo, 'scoring_enabled', '1');
       if ($enabled !== '1') {
-        $pdo->prepare('DELETE FROM qr_claims WHERE id = ?')->execute([$claimId]);
         fail('El puntaje está pausado', 403, 'SCORING_DISABLED');
       }
+
+      $claimInsert = $pdo->prepare('INSERT INTO qr_claims (qr_id, player_id, applied_points) VALUES (?, ?, 0)');
+      try {
+        $claimInsert->execute([$qrId, $playerId]);
+      } catch (Throwable $e) {
+        if (is_unique_violation($e)) {
+          fail('Ya canjeaste este QR', 409, 'ALREADY_CLAIMED');
+        }
+        throw $e;
+      }
+
+      $claimId = (int) $pdo->lastInsertId();
 
       $multiplier = (int) setting_get($pdo, 'qr_multiplier', '1');
       if ($multiplier < 1) {
@@ -997,38 +1028,12 @@ try {
 
       ok([
         'qr_type' => 'secret',
-        'code' => (string) $qr['code'],
         'applied_points' => $appliedPoints,
         'message' => 'QR secreto canjeado',
       ]);
     }
 
-    $gameCode = (string) ($qr['game_code'] ?? '');
-    if ($gameCode === '') {
-      $pdo->prepare('DELETE FROM qr_claims WHERE id = ?')->execute([$claimId]);
-      fail('QR de juego mal configurado', 422, 'GAME_CODE_REQUIRED');
-    }
-
-    $gameStmt = $pdo->prepare('SELECT id, code, is_active FROM games WHERE code = ? LIMIT 1');
-    $gameStmt->execute([$gameCode]);
-    $game = $gameStmt->fetch();
-    if (!$game || (int) $game['is_active'] !== 1) {
-      $pdo->prepare('DELETE FROM qr_claims WHERE id = ?')->execute([$claimId]);
-      fail('Ese juego está apagado', 403, 'GAME_INACTIVE');
-    }
-
-    $redirectUrl = '../admin/' . rawurlencode($gameCode) . '.html';
-    if (isset($_SERVER['SCRIPT_NAME']) && str_contains((string) $_SERVER['SCRIPT_NAME'], '/admin/')) {
-      $redirectUrl = './' . rawurlencode($gameCode) . '.html';
-    }
-
-    ok([
-      'qr_type' => 'game',
-      'code' => (string) $qr['code'],
-      'game_code' => $gameCode,
-      'redirect_url' => $redirectUrl,
-      'message' => 'QR de juego validado',
-    ]);
+    fail('Tipo de QR inválido', 422, 'INVALID_QR_TYPE');
   }
 
   if ($method === 'POST' && $action === 'admin_qr_create') {
