@@ -1,21 +1,18 @@
 <?php
 header('Content-Type: application/json; charset=utf-8');
 
-$BASE_DIR = is_file(__DIR__ . '/config.php') ? __DIR__ : dirname(__DIR__);
-$GLOBALS['BASE_DIR'] = $BASE_DIR;
-
 require_once __DIR__ . '/error_logger.php';
 
 $requestId = bin2hex(random_bytes(6));
 init_error_logging([
   'context' => 'api',
   'request_id' => $requestId,
-  'base_dir' => $BASE_DIR,
+  'base_dir' => __DIR__,
 ]);
 
-$config = require_once __DIR__ . '/admin/config.php';
+$config = require __DIR__ . '/config.php';
 
-require_once __DIR__ . '/admin/virus_lib.php';
+require_once __DIR__ . '/virus_lib.php';
 
 
 function body_json(): array {
@@ -461,7 +458,7 @@ function admin_is_authorized(array $config): bool {
 }
 
 function error_log_file_path(): string {
-  return error_logger_file_path($GLOBALS['BASE_DIR'] ?? __DIR__);
+  return error_logger_file_path(__DIR__);
 }
 
 function read_log_tail(string $file, int $lines = 200): array {
