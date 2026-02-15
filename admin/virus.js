@@ -40,8 +40,9 @@
   }
 
   function authPayload() {
-    const playerId = Number(localStorage.getItem('player_id') || 0);
-    const playerToken = localStorage.getItem('player_token') || '';
+    const currentPlayer = window.CURRENT_PLAYER || {};
+    const playerId = Number(currentPlayer.id || localStorage.getItem('player_id') || 0);
+    const playerToken = String(currentPlayer.player_token || localStorage.getItem('player_token') || '');
     if (playerToken) return { player_token: playerToken };
     return { player_id: playerId };
   }
@@ -158,14 +159,15 @@
   }
 
   async function loadStatus() {
-    const playerId = Number(localStorage.getItem('player_id') || 0);
-    const playerToken = localStorage.getItem('player_token') || '';
+    const payload = authPayload();
+    const playerId = Number(payload.player_id || 0);
+    const playerToken = String(payload.player_token || '');
     if (!playerId && !playerToken) {
-      setStatus('No hay identidad de jugador en este dispositivo. Volvé al inicio.');
+      setStatus('No hay identidad de jugador activa en este dispositivo.');
       return;
     }
 
-    const st = await call('virus_status', 'GET', authPayload());
+    const st = await call('virus_status', 'GET', payload);
     statusCache = st;
 
     if (!st.is_active) {
@@ -273,13 +275,18 @@
   });
   searchEl.addEventListener('input', renderPending);
 
-  (async function init() {
+  async function iniciarJuego() {
+    await loadStatus();
+    await loadQr();
+    setInterval(loadStatus, 10000);
+    setInterval(loadQr, 30000);
+  }
+
+  (async () => {
     try {
-      await window.PlayerContext.ensureActivePlayerForThisDevice();
-      await loadStatus();
-      await loadQr();
-      setInterval(loadStatus, 10000);
-      setInterval(loadQr, 30000);
+      const player = await window.PlayerContext.ensureActivePlayerForThisDevice();
+      window.CURRENT_PLAYER = player;
+      await iniciarJuego();
     } catch (err) {
       setStatus(err.message);
     }
