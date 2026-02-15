@@ -83,7 +83,6 @@
   <script src="player_context.js"></script>
   <script>
     const API = 'api.php';
-    const WELCOME_PAGE = '../index.html';
     const TOTAL_MS = 20000;
     const MODE_STORAGE_KEY = 'sumador_mode';
     const GAME_CODE = 'sumador';
@@ -135,13 +134,17 @@
     }
 
     function authPayload() {
-      if (activePlayerToken && activePlayerId > 0) {
-        return { player_id: activePlayerId, player_token: activePlayerToken };
+      const currentPlayer = window.CURRENT_PLAYER || {};
+      const playerId = Number(currentPlayer.id || activePlayerId || 0);
+      const playerToken = String(currentPlayer.player_token || activePlayerToken || '');
+
+      if (playerToken && playerId > 0) {
+        return { player_id: playerId, player_token: playerToken };
       }
-      if (activePlayerToken) {
-        return { player_token: activePlayerToken };
+      if (playerToken) {
+        return { player_token: playerToken };
       }
-      return { player_id: activePlayerId };
+      return { player_id: playerId };
     }
 
     function applyModeUI() {
@@ -183,17 +186,20 @@
     async function ensurePlayer() {
       try {
         const player = await window.PlayerContext.ensureActivePlayerForThisDevice();
+        window.CURRENT_PLAYER = player;
         activePlayerId = Number(player.id || localStorage.getItem('player_id') || 0);
         activePlayerToken = String(player.player_token || localStorage.getItem('player_token') || '');
       } catch (err) {
         setStatus(err.message || 'No hay jugador activo.');
-        location.href = WELCOME_PAGE;
+        playerStatusEl.textContent = 'No disponible';
+        startBtn.disabled = true;
       }
     }
 
     async function fetchPlayerInfo() {
       if (activePlayerId <= 0 && !activePlayerToken) {
-        location.href = WELCOME_PAGE;
+        setStatus('No se pudo resolver el jugador activo en este dispositivo.');
+        startBtn.disabled = true;
         return;
       }
 
@@ -295,7 +301,8 @@
       }
 
       if (activePlayerId <= 0 && !activePlayerToken) {
-        location.href = WELCOME_PAGE;
+        setStatus('No hay jugador activo para iniciar la partida.');
+        startBtn.disabled = true;
         return;
       }
 
@@ -330,11 +337,16 @@
     modePracticeBtn.addEventListener('click', () => setGameMode('practice'));
     modeRealBtn.addEventListener('click', () => setGameMode('real'));
 
-    startBtn.disabled = true;
-    (async function init() {
+    async function iniciarJuego() {
       applyModeUI();
-      await ensurePlayer();
       await fetchPlayerInfo();
+    }
+
+    startBtn.disabled = true;
+    (async () => {
+      await ensurePlayer();
+      if (!window.CURRENT_PLAYER) return;
+      await iniciarJuego();
     })();
   </script>
 </body>
