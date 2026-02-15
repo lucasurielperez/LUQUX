@@ -34,6 +34,22 @@
         actionsEl.appendChild(a);
       }
 
+      function resolveRedirect(ru) {
+        if (!ru) return null;
+
+        // Si viene sin protocolo tipo "pcn.com.ar/123/..."
+        if (ru.startsWith('pcn.com.ar/')) return 'https://' + ru;
+
+        // Si viene protocol-relative "//pcn.com.ar/..."
+        if (ru.startsWith('//')) return location.protocol + ru;
+
+        // Absoluto del host "/123/admin/..."
+        if (ru.startsWith('/')) return location.origin + ru;
+
+        // Relativo "admin/..." o similar
+        return new URL(ru, window.location.href).toString();
+      }
+
       if (!code) {
         resultEl.textContent = 'QR inválido: falta code.';
         resultEl.className = 'bad';
@@ -53,9 +69,14 @@
         }
 
         let { res, data } = await claim();
+
+        // Si el QR requiere jugador (solo debería pasar en secretos)
         if ((!res.ok || !data.ok) && data.code === 'PLAYER_REQUIRED') {
           const player = await window.PlayerContext.ensureActivePlayerForThisDevice();
-          ({ res, data } = await claim({ player_token: player.player_token, player_id: player.id }));
+          ({ res, data } = await claim({
+            player_token: player.player_token,
+            player_id: player.id
+          }));
         }
 
         if (!res.ok || !data.ok) {
@@ -81,23 +102,44 @@
 
         if (data.qr_type === 'secret') {
           const pts = Number(data.applied_points || 0);
-          resultEl.innerHTML = `<div class="big ${pts >= 0 ? 'ok' : 'bad'}">${pts > 0 ? '+' : ''}${pts}</div><div>QR secreto canjeado</div>`;
+          resultEl.innerHTML = `
+            <div class="big ${pts >= 0 ? 'ok' : 'bad'}">
+              ${pts > 0 ? '+' : ''}${pts}
+            </div>
+            <div>QR secreto canjeado</div>
+          `;
           showButton('Seguir', 'index.html');
           return;
         }
 
         if (data.qr_type === 'game') {
-          resultEl.innerHTML = '<h3>Juego desbloqueado</h3><p class="muted">Serás redirigido automáticamente.</p>';
-          showButton('Ir al juego', data.redirect_url || 'admin/virus.html');
+          const finalUrl = resolveRedirect(data.redirect_url);
+
+          if (!finalUrl) {
+            resultEl.innerHTML = '<h3>Error</h3><p class="muted">El servidor no devolvió un destino de redirección.</p>';
+            resultEl.className = 'bad';
+            showButton('Volver', 'index.html');
+            return;
+          }
+
+          resultEl.innerHTML = `
+            <h3>Juego listo</h3>
+            <p class="muted">Serás redirigido automáticamente.</p>
+          `;
+
+          showButton('Ir al juego', finalUrl);
+
           setTimeout(() => {
-            location.href = data.redirect_url || 'admin/virus.html';
-          }, 2000);
+            window.location.href = finalUrl;
+          }, 1200);
+
           return;
         }
 
         resultEl.textContent = 'Respuesta desconocida';
         resultEl.className = 'bad';
         showButton('Volver', 'index.html');
+
       } catch (err) {
         resultEl.textContent = err.message || 'Error de red';
         resultEl.className = 'bad';
