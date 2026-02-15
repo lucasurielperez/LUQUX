@@ -980,10 +980,7 @@ try {
         fail('Ese juego está apagado', 403, 'GAME_INACTIVE');
       }
 
-      $redirectUrl = '../admin/' . rawurlencode($gameCode) . '.html';
-      if (isset($_SERVER['SCRIPT_NAME']) && str_contains((string) $_SERVER['SCRIPT_NAME'], '/admin/')) {
-        $redirectUrl = './' . rawurlencode($gameCode) . '.html';
-      }
+      $redirectUrl = '/123/admin/' . rawurlencode($gameCode) . '.html';
 
       ok([
         'qr_type' => 'game',
