@@ -58,9 +58,28 @@
       text-shadow: 0 0 24px rgba(126, 204, 255, 0.45);
     }
     .sub {
-      text-align: center;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: .6vw;
       font-size: clamp(16px, 2.1vh, 30px);
       color: #b9cdff;
+    }
+    .sub-main {
+      display: inline-flex;
+      align-items: center;
+      gap: .35vw;
+    }
+    .refresh-select {
+      appearance: none;
+      min-width: 6.5em;
+      padding: .2em .5em;
+      font-size: .72em;
+      color: #dce8ff;
+      background: rgba(10, 22, 58, .72);
+      border: 1px solid rgba(151, 181, 255, .45);
+      border-radius: 8px;
+      outline: none;
     }
     .sub .updating { opacity: .85; color: #ffd682; }
 
@@ -166,7 +185,16 @@
 <body>
   <div class="screen">
     <h1 class="title">🏆 LEADERBOARD</h1>
-    <div class="sub">Actualiza cada 60s · <span id="cycleTime">--:--:--</span><span id="updating" class="updating"></span></div>
+    <div class="sub">
+      <span class="sub-main">Próxima actualización en: <span id="countdown">60</span>s<span id="updating" class="updating"></span></span>
+      <select id="refreshSelect" class="refresh-select" aria-label="Intervalo de actualización">
+        <option value="1000">1 segundo</option>
+        <option value="5000">5 segundos</option>
+        <option value="10000">10 segundos</option>
+        <option value="30000">30 segundos</option>
+        <option value="60000">60 segundos</option>
+      </select>
+    </div>
 
     <div class="table-wrap">
       <table>
@@ -185,7 +213,7 @@
 
     <div class="footer">
       <span id="errorMsg"></span>
-      <span id="lastOk">Última actualización: --:--:--</span>
+      <span id="lastOk">Última actualización: --</span>
     </div>
   </div>
 
