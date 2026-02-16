@@ -35,9 +35,15 @@
     if (!lastEvent) return '—';
 
     const gameCode = String(lastEvent.game_code || '').trim().toLowerCase();
+    const eventType = String(lastEvent.event_type || '').trim().toUpperCase();
     const gameName = gameNames[gameCode] || (gameCode ? gameCode.charAt(0).toUpperCase() + gameCode.slice(1) : 'Acción');
     const deltaText = formatPointsDelta(Number(lastEvent.points_delta));
     const note = String(lastEvent.note || '').trim();
+
+    if (eventType === 'QR_SECRET') {
+      const qrPoints = deltaText || '0';
+      return `QR de ${qrPoints} puntos.`;
+    }
 
     if (!deltaText && !note) {
       return gameName;
