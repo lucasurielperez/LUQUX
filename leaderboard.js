@@ -1,9 +1,10 @@
 (function () {
   const API_URL = 'api.php?action=public_leaderboard_top';
-  const REFRESH_MS = 60000;
+  const ALLOWED_REFRESH_MS = [1000, 5000, 10000, 30000, 60000];
 
   const lbBody = document.getElementById('lbBody');
-  const cycleTimeEl = document.getElementById('cycleTime');
+  const countdownEl = document.getElementById('countdown');
+  const refreshSelect = document.getElementById('refreshSelect');
   const updatingEl = document.getElementById('updating');
   const errorMsgEl = document.getElementById('errorMsg');
   const lastOkEl = document.getElementById('lastOk');
@@ -14,17 +15,27 @@
   const confettiLayer = document.getElementById('confettiLayer');
 
   let prevRanksByPlayerId = new Map();
+  let refreshMs = Number(localStorage.getItem('lb_refresh_ms')) || 60000;
+  if (!ALLOWED_REFRESH_MS.includes(refreshMs)) {
+    refreshMs = 60000;
+  }
+
+  refreshSelect.value = String(refreshMs);
+  if (refreshSelect.value !== String(refreshMs)) {
+    refreshMs = 60000;
+    refreshSelect.value = '60000';
+  }
+
+  let nextRefreshAt = Date.now() + refreshMs;
+  let lastOkAt = null;
   let refreshTimer = null;
+  let countdownTimer = null;
   let celebrationTimer = null;
 
   const gameNames = {
     sumador: 'Sumador',
     virus: 'Virus',
   };
-
-  function formatClock(date) {
-    return date.toLocaleTimeString('es-AR', { hour12: false });
-  }
 
   function formatPointsDelta(delta) {
     if (typeof delta !== 'number' || Number.isNaN(delta)) return '';
@@ -96,9 +107,19 @@
     }).join('');
   }
 
-  function updateSubtitle(serverGeneratedAt) {
-    const now = serverGeneratedAt ? new Date(String(serverGeneratedAt).replace(' ', 'T')) : new Date();
-    cycleTimeEl.textContent = formatClock(now);
+  function updateCountdown() {
+    const remaining = Math.max(0, nextRefreshAt - Date.now());
+    countdownEl.textContent = String(Math.ceil(remaining / 1000));
+  }
+
+  function updateLastOkText() {
+    if (!lastOkAt) {
+      lastOkEl.textContent = 'Última actualización: --';
+      return;
+    }
+
+    const elapsedSec = Math.floor((Date.now() - lastOkAt) / 1000);
+    lastOkEl.textContent = `Actualizado hace: ${elapsedSec}s`;
   }
 
   function detectCelebration(rows) {
@@ -182,23 +203,40 @@
       snapshotRanks(rows);
       showCelebration(celebrationCandidate);
 
-      const now = new Date();
-      lastOkEl.textContent = `Última actualización: ${formatClock(now)}`;
+      lastOkAt = Date.now();
+      updateLastOkText();
       errorMsgEl.textContent = '';
       errorMsgEl.classList.remove('error');
-      updateSubtitle(data.generated_at || null);
     } catch (err) {
       errorMsgEl.textContent = 'Sin conexión / Error actualizando';
       errorMsgEl.classList.add('error');
     } finally {
       updatingEl.textContent = '';
+      nextRefreshAt = Date.now() + refreshMs;
+      updateCountdown();
     }
   }
 
-  function startAutoRefresh() {
-    refreshLeaderboard();
-    refreshTimer = setInterval(refreshLeaderboard, REFRESH_MS);
+  function startRefreshTimer() {
+    if (refreshTimer) {
+      clearInterval(refreshTimer);
+    }
+
+    nextRefreshAt = Date.now() + refreshMs;
+    updateCountdown();
+    refreshTimer = setInterval(function () {
+      refreshLeaderboard();
+    }, refreshMs);
   }
+
+  refreshSelect.addEventListener('change', function () {
+    const selectedMs = Number(refreshSelect.value) || 60000;
+    refreshMs = ALLOWED_REFRESH_MS.includes(selectedMs) ? selectedMs : 60000;
+    refreshSelect.value = String(refreshMs);
+    localStorage.setItem('lb_refresh_ms', String(refreshMs));
+    startRefreshTimer();
+    refreshLeaderboard();
+  });
 
   document.addEventListener('dblclick', function (ev) {
     ev.preventDefault();
@@ -214,8 +252,14 @@
 
   window.addEventListener('beforeunload', function () {
     clearInterval(refreshTimer);
+    clearInterval(countdownTimer);
     clearTimeout(celebrationTimer);
   });
 
-  startAutoRefresh();
+  startRefreshTimer();
+  countdownTimer = setInterval(function () {
+    updateCountdown();
+    updateLastOkText();
+  }, 250);
+  refreshLeaderboard();
 })();
