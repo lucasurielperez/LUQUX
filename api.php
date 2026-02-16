@@ -452,6 +452,31 @@ function is_unique_violation(Throwable $e): bool {
   return $sqlState === '23000' || $mysqlCode === 1062;
 }
 
+function db_has_column(PDO $pdo, string $table, string $column): bool {
+  static $cache = [];
+  $key = $table . '.' . $column;
+  if (array_key_exists($key, $cache)) {
+    return $cache[$key];
+  }
+
+  $dbName = (string) $pdo->query('SELECT DATABASE()')->fetchColumn();
+  if ($dbName === '') {
+    $cache[$key] = false;
+    return false;
+  }
+
+  $stmt = $pdo->prepare(
+    'SELECT 1
+     FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?
+     LIMIT 1'
+  );
+  $stmt->execute([$dbName, $table, $column]);
+  $cache[$key] = (bool) $stmt->fetchColumn();
+
+  return $cache[$key];
+}
+
 function admin_is_authorized(array $config): bool {
   $token = auth_bearer_token();
   return $token !== '' && hash_equals((string) $config['admin_token'], $token);
@@ -990,23 +1015,16 @@ try {
     }
 
     if ($qrType === 'secret') {
+      // Manual test checklist:
+      // 1) Primer claim OK => qr_claims.status=applied + applied_points>0 + score_events (qr_secret).
+      // 2) Reintento del mismo QR => ALREADY_CLAIMED.
+      // 3) Forzar error en medio de la transacción => rollback completo (sin claim/evento parcial).
+      // 4) Claim legacy pending/applied_points=0 => reintento completa y marca claim como applied.
       $playerId = resolve_player_id($pdo, $payload);
       $enabled = setting_get($pdo, 'scoring_enabled', '1');
       if ($enabled !== '1') {
         fail('El puntaje está pausado', 403, 'SCORING_DISABLED');
       }
-
-      $claimInsert = $pdo->prepare('INSERT INTO qr_claims (qr_id, player_id, applied_points) VALUES (?, ?, 0)');
-      try {
-        $claimInsert->execute([$qrId, $playerId]);
-      } catch (Throwable $e) {
-        if (is_unique_violation($e)) {
-          fail('Ya canjeaste este QR', 409, 'ALREADY_CLAIMED');
-        }
-        throw $e;
-      }
-
-      $claimId = (int) $pdo->lastInsertId();
 
       $multiplier = (int) setting_get($pdo, 'qr_multiplier', '1');
       if ($multiplier < 1) {
@@ -1014,15 +1032,123 @@ try {
       }
 
       $appliedPoints = (int) $qr['points_delta'] * $multiplier;
+
+      $qrClaimsHasStatus = db_has_column($pdo, 'qr_claims', 'status');
+      $qrClaimsHasAppliedAt = db_has_column($pdo, 'qr_claims', 'applied_at');
+      $qrClaimsHasError = db_has_column($pdo, 'qr_claims', 'error');
+      $scoreEventsHasIdempotency = db_has_column($pdo, 'score_events', 'idempotency_key');
+      $idempotencyKey = 'qr_secret:' . $qrId . ':' . $playerId;
+
+      $alreadyClaimed = false;
+
       $pdo->beginTransaction();
-      $pdo->prepare('UPDATE qr_claims SET applied_points = ? WHERE id = ?')->execute([$appliedPoints, $claimId]);
-      $insEvent = $pdo->prepare("INSERT INTO score_events (player_id, event_type, points_delta, secret_qr_id, note) VALUES (?, 'qr_secret', ?, ?, ?)");
-      $insEvent->execute([$playerId, $appliedPoints, $qrId, 'QR secreto ' . (string) $qr['code']]);
-      $pdo->commit();
+      try {
+        $claimSelectSql = 'SELECT id, applied_points';
+        if ($qrClaimsHasStatus) {
+          $claimSelectSql .= ', status';
+        }
+        $claimSelectSql .= ' FROM qr_claims WHERE qr_id = ? AND player_id = ? LIMIT 1 FOR UPDATE';
+
+        $claimSelect = $pdo->prepare($claimSelectSql);
+        $claimSelect->execute([$qrId, $playerId]);
+        $claim = $claimSelect->fetch();
+
+        if (!$claim) {
+          $insertColumns = 'qr_id, player_id, applied_points';
+          $insertValues = '?, ?, 0';
+          $insertParams = [$qrId, $playerId];
+          if ($qrClaimsHasStatus) {
+            $insertColumns .= ', status';
+            $insertValues .= ', ?';
+            $insertParams[] = 'pending';
+          }
+
+          $claimInsert = $pdo->prepare('INSERT INTO qr_claims (' . $insertColumns . ') VALUES (' . $insertValues . ')');
+          try {
+            $claimInsert->execute($insertParams);
+          } catch (Throwable $e) {
+            if (!is_unique_violation($e)) {
+              throw $e;
+            }
+          }
+
+          $claimSelect->execute([$qrId, $playerId]);
+          $claim = $claimSelect->fetch();
+        }
+
+        if (!$claim) {
+          throw new RuntimeException('No se pudo bloquear el claim QR');
+        }
+
+        $claimId = (int) $claim['id'];
+        $alreadyAppliedByClaim = ((int) $claim['applied_points'] > 0);
+        if ($qrClaimsHasStatus) {
+          $alreadyAppliedByClaim = $alreadyAppliedByClaim || ((string) ($claim['status'] ?? '') === 'applied');
+        }
+
+        if ($alreadyAppliedByClaim) {
+          $alreadyClaimed = true;
+        } else {
+          $note = 'QR secreto ' . (string) $qr['code'];
+          if ($scoreEventsHasIdempotency) {
+            $evStmt = $pdo->prepare('SELECT id, points_delta FROM score_events WHERE idempotency_key = ? LIMIT 1 FOR UPDATE');
+            $evStmt->execute([$idempotencyKey]);
+            $existingEvent = $evStmt->fetch();
+
+            if ($existingEvent) {
+              $alreadyClaimed = true;
+              $appliedPoints = (int) $existingEvent['points_delta'];
+            } else {
+              $insEvent = $pdo->prepare("INSERT INTO score_events (player_id, event_type, points_delta, secret_qr_id, note, idempotency_key) VALUES (?, 'qr_secret', ?, ?, ?, ?)");
+              $insEvent->execute([$playerId, $appliedPoints, $qrId, $note, $idempotencyKey]);
+            }
+          } else {
+            $insEvent = $pdo->prepare("INSERT INTO score_events (player_id, event_type, points_delta, secret_qr_id, note) VALUES (?, 'qr_secret', ?, ?, ?)");
+            $insEvent->execute([$playerId, $appliedPoints, $qrId, $note]);
+          }
+
+          $claimUpdateParts = ['applied_points = ?'];
+          $claimUpdateParams = [$appliedPoints];
+          if ($qrClaimsHasStatus) {
+            $claimUpdateParts[] = 'status = ?';
+            $claimUpdateParams[] = 'applied';
+          }
+          if ($qrClaimsHasAppliedAt) {
+            $claimUpdateParts[] = 'applied_at = NOW()';
+          }
+          if ($qrClaimsHasError) {
+            $claimUpdateParts[] = '`error` = NULL';
+          }
+          $claimUpdateParams[] = $claimId;
+
+          $claimUpdate = $pdo->prepare('UPDATE qr_claims SET ' . implode(', ', $claimUpdateParts) . ' WHERE id = ?');
+          $claimUpdate->execute($claimUpdateParams);
+        }
+
+        $pdo->commit();
+      } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+          $pdo->rollBack();
+        }
+        throw $e;
+      }
+
+      if ($alreadyClaimed) {
+        fail('Ya canjeaste este QR.', 409, 'ALREADY_CLAIMED');
+      }
+
+      $totalStmt = $pdo->prepare('SELECT COALESCE(SUM(points_delta), 0) FROM score_events WHERE player_id = ?');
+      $totalStmt->execute([$playerId]);
+      $totalPoints = (int) $totalStmt->fetchColumn();
 
       ok([
+        'status' => 'CLAIMED',
+        'qr_id' => $qrId,
+        'player_id' => $playerId,
         'qr_type' => 'secret',
+        'points_applied' => $appliedPoints,
         'applied_points' => $appliedPoints,
+        'total_points' => $totalPoints,
         'message' => 'QR secreto canjeado',
       ]);
     }
@@ -1100,6 +1226,49 @@ try {
     $stmt = $pdo->prepare('UPDATE qr_codes SET is_active = ? WHERE id = ?');
     $stmt->execute([$isActive, $id]);
     ok(['updated' => $stmt->rowCount()]);
+  }
+
+  if ($method === 'POST' && $action === 'admin_qr_claims_cleanup') {
+    $b = body_json();
+    $minutes = (int) ($b['older_than_minutes'] ?? 10);
+    if ($minutes < 1) {
+      $minutes = 1;
+    }
+
+    $mode = strtolower(trim((string) ($b['mode'] ?? 'mark_failed')));
+    if ($mode !== 'delete' && $mode !== 'mark_failed') {
+      fail('mode inválido', 422, 'INVALID_MODE');
+    }
+
+    if (!db_has_column($pdo, 'qr_claims', 'status')) {
+      fail('La tabla qr_claims no tiene columna status. Ejecutá migración primero.', 422, 'MIGRATION_REQUIRED');
+    }
+
+    $hasError = db_has_column($pdo, 'qr_claims', 'error');
+    $hasAppliedAt = db_has_column($pdo, 'qr_claims', 'applied_at');
+    $thresholdExpr = 'DATE_SUB(NOW(), INTERVAL ? MINUTE)';
+
+    if ($mode === 'delete') {
+      $stmt = $pdo->prepare('DELETE FROM qr_claims WHERE status = ? AND applied_points = 0 AND claimed_at < ' . $thresholdExpr);
+      $stmt->execute(['pending', $minutes]);
+      ok(['mode' => $mode, 'older_than_minutes' => $minutes, 'affected' => $stmt->rowCount()]);
+    }
+
+    $updates = ['status = ?'];
+    $params = ['failed'];
+    if ($hasError) {
+      $updates[] = '`error` = ?';
+      $params[] = 'Auto cleanup: pending expirado';
+    }
+    if ($hasAppliedAt) {
+      $updates[] = 'applied_at = NULL';
+    }
+    $params[] = 'pending';
+    $params[] = $minutes;
+
+    $stmt = $pdo->prepare('UPDATE qr_claims SET ' . implode(', ', $updates) . ' WHERE status = ? AND applied_points = 0 AND claimed_at < ' . $thresholdExpr);
+    $stmt->execute($params);
+    ok(['mode' => $mode, 'older_than_minutes' => $minutes, 'affected' => $stmt->rowCount()]);
   }
 
   if ($method === 'POST' && $action === 'sumador_start') {
