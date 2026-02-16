@@ -24,7 +24,10 @@
     (async function () {
       const resultEl = document.getElementById('result');
       const actionsEl = document.getElementById('actions');
-      const code = new URLSearchParams(location.search).get('code') || '';
+      const params = new URLSearchParams(location.search);
+      const code = params.get('code') || '';
+      const returnToRaw = params.get('return_to') || '';
+      const returnMode = params.get('return_mode') || '';
 
       function showButton(label, href) {
         actionsEl.innerHTML = '';
@@ -56,6 +59,34 @@
         return new URL(ru, window.location.href).toString();
       }
 
+      function getSafeReturnTo(value) {
+        const target = String(value || '').trim();
+        if (!target) return '';
+        if (!target.startsWith('/')) return '';
+        if (target.includes('//')) return '';
+        return target;
+      }
+
+      function showReturnToScanner(target, mode) {
+        if (!target) return;
+
+        showButton('Volver ahora', target);
+
+        const wrap = document.createElement('div');
+        wrap.className = 'muted';
+        wrap.style.marginTop = '10px';
+        wrap.textContent = 'Volviendo al escáner…';
+        actionsEl.prepend(wrap);
+
+        if (mode === 'auto') {
+          setTimeout(() => {
+            window.location.href = target;
+          }, 1700);
+        }
+      }
+
+      const safeReturnTo = getSafeReturnTo(returnToRaw);
+
       if (!code) {
         resultEl.textContent = 'QR inválido';
         resultEl.className = 'bad';
@@ -85,23 +116,36 @@
         }
 
         if (!res.ok || !data.ok) {
+          let knownError = false;
+
           if (data.code === 'ALREADY_CLAIMED') {
             resultEl.innerHTML = '<h3>Ya canjeaste este QR</h3>';
+            knownError = true;
           } else if (data.code === 'PLAYER_REQUIRED') {
             resultEl.innerHTML = '<h3>Necesitás elegir un jugador para este QR</h3>';
+            knownError = true;
           } else if (data.code === 'QR_NOT_FOUND') {
             resultEl.innerHTML = '<h3>QR no encontrado</h3>';
+            knownError = true;
           } else if (data.code === 'QR_INACTIVE') {
             resultEl.innerHTML = '<h3>Este QR está inactivo</h3>';
+            knownError = true;
           } else if (data.code === 'GAME_NOT_FOUND') {
             resultEl.innerHTML = '<h3>Juego no encontrado</h3>';
+            knownError = true;
           } else if (data.code === 'GAME_INACTIVE') {
             resultEl.innerHTML = '<h3>Ese juego está apagado</h3>';
+            knownError = true;
           } else {
             resultEl.textContent = 'No se pudo canjear el QR';
           }
           resultEl.className = 'bad';
-          showButton('Volver', 'index.html');
+
+          if (knownError && safeReturnTo) {
+            showReturnToScanner(safeReturnTo, returnMode);
+          } else {
+            showButton('Volver', 'index.html');
+          }
           return;
         }
 
@@ -113,7 +157,12 @@
             </div>
             <div>QR secreto canjeado</div>
           `;
-          showButton('Seguir', 'index.html');
+
+          if (safeReturnTo) {
+            showReturnToScanner(safeReturnTo, returnMode);
+          } else {
+            showButton('Seguir', 'index.html');
+          }
           return;
         }
 
