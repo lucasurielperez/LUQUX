@@ -15,7 +15,7 @@
 <body>
   <div class="box">
     <h2>Procesando QR…</h2>
-    <div id="result" class="muted">Esperá un instante</div>
+    <div id="result" class="muted">QR detectado. Procesando…</div>
     <div id="actions"></div>
   </div>
 
@@ -57,7 +57,7 @@
       }
 
       if (!code) {
-        resultEl.textContent = 'QR inválido: falta code.';
+        resultEl.textContent = 'QR inválido';
         resultEl.className = 'bad';
         showButton('Volver', 'index.html');
         return;
@@ -98,7 +98,7 @@
           } else if (data.code === 'GAME_INACTIVE') {
             resultEl.innerHTML = '<h3>Ese juego está apagado</h3>';
           } else {
-            resultEl.textContent = data.error || 'No se pudo canjear el QR';
+            resultEl.textContent = 'No se pudo canjear el QR';
           }
           resultEl.className = 'bad';
           showButton('Volver', 'index.html');
@@ -139,7 +139,7 @@
         showButton('Volver', 'index.html');
 
       } catch (err) {
-        resultEl.textContent = err.message || 'Error de red';
+        resultEl.textContent = 'Error de red';
         resultEl.className = 'bad';
         showButton('Volver', 'index.html');
       }
