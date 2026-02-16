@@ -971,6 +971,13 @@ try {
 
   if (($method === 'GET' || $method === 'POST') && $action === 'qr_claim') {
     $payload = ($method === 'POST') ? body_json() : $_GET;
+    $playerId = resolve_player_id($pdo, $payload);
+
+    $enabled = setting_get($pdo, 'scoring_enabled', '1');
+    if ($enabled !== '1') {
+      fail('El puntaje está pausado', 403, 'SCORING_DISABLED');
+    }
+
     $code = strtoupper(trim((string) ($payload['code'] ?? '')));
     if ($code === '') {
       fail('code requerido', 422, 'CODE_REQUIRED');
@@ -987,173 +994,97 @@ try {
     }
 
     $qrId = (int) $qr['id'];
-    $qrType = (string) ($qr['qr_type'] ?? '');
 
-    if ($qrType === 'game') {
-      $gameCode = (string) ($qr['game_code'] ?? '');
-      if ($gameCode === '') {
-        fail('Juego no encontrado', 404, 'GAME_NOT_FOUND');
+    $pdo->beginTransaction();
+    try {
+      $qrLockStmt = $pdo->prepare('SELECT id, code, qr_type, game_code, points_delta, is_active FROM qr_codes WHERE id = ? LIMIT 1 FOR UPDATE');
+      $qrLockStmt->execute([$qrId]);
+      $lockedQr = $qrLockStmt->fetch();
+
+      if (!$lockedQr) {
+        throw new RuntimeException('QR no encontrado durante lock');
+      }
+      if ((int) $lockedQr['is_active'] !== 1) {
+        $pdo->rollBack();
+        fail('QR inactivo', 403, 'QR_INACTIVE');
       }
 
-      $gameStmt = $pdo->prepare('SELECT id, code, is_active FROM games WHERE code = ? LIMIT 1');
-      $gameStmt->execute([$gameCode]);
-      $game = $gameStmt->fetch();
-      if (!$game) {
-        fail('Juego no encontrado', 404, 'GAME_NOT_FOUND');
-      }
-      if ((int) $game['is_active'] !== 1) {
-        fail('Ese juego está apagado', 403, 'GAME_INACTIVE');
-      }
-
-      $redirectUrl = '/123/admin/' . rawurlencode($gameCode) . '.html';
-
-      ok([
-        'qr_type' => 'game',
-        'redirect_url' => $redirectUrl,
-        'message' => 'OK',
-      ]);
-    }
-
-    if ($qrType === 'secret') {
-      // Manual test checklist:
-      // 1) Primer claim OK => qr_claims.status=applied + applied_points>0 + score_events (qr_secret).
-      // 2) Reintento del mismo QR => ALREADY_CLAIMED.
-      // 3) Forzar error en medio de la transacción => rollback completo (sin claim/evento parcial).
-      // 4) Claim legacy pending/applied_points=0 => reintento completa y marca claim como applied.
-      $playerId = resolve_player_id($pdo, $payload);
-      $enabled = setting_get($pdo, 'scoring_enabled', '1');
-      if ($enabled !== '1') {
-        fail('El puntaje está pausado', 403, 'SCORING_DISABLED');
-      }
-
-      $multiplier = (int) setting_get($pdo, 'qr_multiplier', '1');
-      if ($multiplier < 1) {
-        $multiplier = 1;
-      }
-
-      $appliedPoints = (int) $qr['points_delta'] * $multiplier;
-
-      $qrClaimsHasStatus = db_has_column($pdo, 'qr_claims', 'status');
-      $qrClaimsHasAppliedAt = db_has_column($pdo, 'qr_claims', 'applied_at');
-      $qrClaimsHasError = db_has_column($pdo, 'qr_claims', 'error');
-      $scoreEventsHasIdempotency = db_has_column($pdo, 'score_events', 'idempotency_key');
-      $idempotencyKey = 'qr_secret:' . $qrId . ':' . $playerId;
-
-      $alreadyClaimed = false;
-
-      $pdo->beginTransaction();
+      $claimStmt = $pdo->prepare('INSERT INTO qr_claims (qr_id, player_id) VALUES (?, ?)');
       try {
-        $claimSelectSql = 'SELECT id, applied_points';
-        if ($qrClaimsHasStatus) {
-          $claimSelectSql .= ', status';
-        }
-        $claimSelectSql .= ' FROM qr_claims WHERE qr_id = ? AND player_id = ? LIMIT 1 FOR UPDATE';
-
-        $claimSelect = $pdo->prepare($claimSelectSql);
-        $claimSelect->execute([$qrId, $playerId]);
-        $claim = $claimSelect->fetch();
-
-        if (!$claim) {
-          $insertColumns = 'qr_id, player_id, applied_points';
-          $insertValues = '?, ?, 0';
-          $insertParams = [$qrId, $playerId];
-          if ($qrClaimsHasStatus) {
-            $insertColumns .= ', status';
-            $insertValues .= ', ?';
-            $insertParams[] = 'pending';
-          }
-
-          $claimInsert = $pdo->prepare('INSERT INTO qr_claims (' . $insertColumns . ') VALUES (' . $insertValues . ')');
-          try {
-            $claimInsert->execute($insertParams);
-          } catch (Throwable $e) {
-            if (!is_unique_violation($e)) {
-              throw $e;
-            }
-          }
-
-          $claimSelect->execute([$qrId, $playerId]);
-          $claim = $claimSelect->fetch();
-        }
-
-        if (!$claim) {
-          throw new RuntimeException('No se pudo bloquear el claim QR');
-        }
-
-        $claimId = (int) $claim['id'];
-        $alreadyAppliedByClaim = ((int) $claim['applied_points'] > 0);
-        if ($qrClaimsHasStatus) {
-          $alreadyAppliedByClaim = $alreadyAppliedByClaim || ((string) ($claim['status'] ?? '') === 'applied');
-        }
-
-        if ($alreadyAppliedByClaim) {
-          $alreadyClaimed = true;
-        } else {
-          $note = 'QR secreto ' . (string) $qr['code'];
-          if ($scoreEventsHasIdempotency) {
-            $evStmt = $pdo->prepare('SELECT id, points_delta FROM score_events WHERE idempotency_key = ? LIMIT 1 FOR UPDATE');
-            $evStmt->execute([$idempotencyKey]);
-            $existingEvent = $evStmt->fetch();
-
-            if ($existingEvent) {
-              $alreadyClaimed = true;
-              $appliedPoints = (int) $existingEvent['points_delta'];
-            } else {
-              $insEvent = $pdo->prepare("INSERT INTO score_events (player_id, event_type, points_delta, secret_qr_id, note, idempotency_key) VALUES (?, 'qr_secret', ?, ?, ?, ?)");
-              $insEvent->execute([$playerId, $appliedPoints, $qrId, $note, $idempotencyKey]);
-            }
-          } else {
-            $insEvent = $pdo->prepare("INSERT INTO score_events (player_id, event_type, points_delta, secret_qr_id, note) VALUES (?, 'qr_secret', ?, ?, ?)");
-            $insEvent->execute([$playerId, $appliedPoints, $qrId, $note]);
-          }
-
-          $claimUpdateParts = ['applied_points = ?'];
-          $claimUpdateParams = [$appliedPoints];
-          if ($qrClaimsHasStatus) {
-            $claimUpdateParts[] = 'status = ?';
-            $claimUpdateParams[] = 'applied';
-          }
-          if ($qrClaimsHasAppliedAt) {
-            $claimUpdateParts[] = 'applied_at = NOW()';
-          }
-          if ($qrClaimsHasError) {
-            $claimUpdateParts[] = '`error` = NULL';
-          }
-          $claimUpdateParams[] = $claimId;
-
-          $claimUpdate = $pdo->prepare('UPDATE qr_claims SET ' . implode(', ', $claimUpdateParts) . ' WHERE id = ?');
-          $claimUpdate->execute($claimUpdateParams);
-        }
-
-        $pdo->commit();
+        $claimStmt->execute([$qrId, $playerId]);
       } catch (Throwable $e) {
-        if ($pdo->inTransaction()) {
+        if (is_unique_violation($e)) {
           $pdo->rollBack();
+          fail('Ya canjeaste este QR.', 409, 'ALREADY_CLAIMED');
         }
         throw $e;
       }
 
-      if ($alreadyClaimed) {
-        fail('Ya canjeaste este QR.', 409, 'ALREADY_CLAIMED');
+      $qrType = (string) ($lockedQr['qr_type'] ?? '');
+      if ($qrType === 'secret') {
+        $multiplier = (int) setting_get($pdo, 'qr_multiplier', '1');
+        if ($multiplier < 1) {
+          $multiplier = 1;
+        }
+
+        $appliedPoints = (int) $lockedQr['points_delta'] * $multiplier;
+        $idempotencyKey = 'qr:' . $qrId . ':' . $playerId;
+        $note = 'QR secreto (code=' . (string) $lockedQr['code'] . ')';
+
+        $scoreStmt = $pdo->prepare("INSERT INTO score_events (player_id, event_type, points_delta, secret_qr_id, note, idempotency_key) VALUES (?, 'QR_SECRET', ?, ?, ?, ?)");
+        try {
+          $scoreStmt->execute([$playerId, $appliedPoints, $qrId, $note, $idempotencyKey]);
+        } catch (Throwable $e) {
+          if (is_unique_violation($e)) {
+            $pdo->rollBack();
+            fail('Ya canjeaste este QR.', 409, 'ALREADY_CLAIMED');
+          }
+          throw $e;
+        }
+
+        $pdo->commit();
+        ok([
+          'qr_type' => 'secret',
+          'applied_points' => $appliedPoints,
+        ]);
       }
 
-      $totalStmt = $pdo->prepare('SELECT COALESCE(SUM(points_delta), 0) FROM score_events WHERE player_id = ?');
-      $totalStmt->execute([$playerId]);
-      $totalPoints = (int) $totalStmt->fetchColumn();
+      if ($qrType === 'game') {
+        $gameCode = (string) ($lockedQr['game_code'] ?? '');
+        if ($gameCode === '') {
+          $pdo->rollBack();
+          fail('Juego no encontrado', 404, 'GAME_NOT_FOUND');
+        }
 
-      ok([
-        'status' => 'CLAIMED',
-        'qr_id' => $qrId,
-        'player_id' => $playerId,
-        'qr_type' => 'secret',
-        'points_applied' => $appliedPoints,
-        'applied_points' => $appliedPoints,
-        'total_points' => $totalPoints,
-        'message' => 'QR secreto canjeado',
-      ]);
+        $gameStmt = $pdo->prepare('SELECT id, is_active FROM games WHERE code = ? LIMIT 1');
+        $gameStmt->execute([$gameCode]);
+        $game = $gameStmt->fetch();
+        if (!$game) {
+          $pdo->rollBack();
+          fail('Juego no encontrado', 404, 'GAME_NOT_FOUND');
+        }
+        if ((int) $game['is_active'] !== 1) {
+          $pdo->rollBack();
+          fail('Ese juego está apagado', 403, 'GAME_INACTIVE');
+        }
+
+        $redirectUrl = '/123/admin/' . rawurlencode($gameCode) . '.html';
+
+        $pdo->commit();
+        ok([
+          'qr_type' => 'game',
+          'redirect_url' => $redirectUrl,
+        ]);
+      }
+
+      $pdo->rollBack();
+      fail('Tipo de QR inválido', 422, 'INVALID_QR_TYPE');
+    } catch (Throwable $e) {
+      if ($pdo->inTransaction()) {
+        $pdo->rollBack();
+      }
+      throw $e;
     }
-
-    fail('Tipo de QR inválido', 422, 'INVALID_QR_TYPE');
   }
 
   if ($method === 'POST' && $action === 'admin_qr_create') {

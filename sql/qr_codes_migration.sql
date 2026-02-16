@@ -16,12 +16,11 @@ CREATE TABLE IF NOT EXISTS qr_claims (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   qr_id BIGINT UNSIGNED NOT NULL,
   player_id BIGINT UNSIGNED NOT NULL,
-  claimed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  applied_points INT NOT NULL DEFAULT 0,
+  claimed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   UNIQUE KEY uq_qr_claims_once (qr_id, player_id),
+  KEY idx_qr_claims_qr (qr_id),
   KEY idx_qr_claims_player (player_id),
-  KEY idx_qr_claims_claimed_at (claimed_at),
   CONSTRAINT fk_qr_claims_qr FOREIGN KEY (qr_id) REFERENCES qr_codes(id) ON DELETE CASCADE,
   CONSTRAINT fk_qr_claims_player FOREIGN KEY (player_id) REFERENCES players(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
