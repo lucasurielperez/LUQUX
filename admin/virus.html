@@ -95,7 +95,77 @@
     }
 
     .muted { opacity: .8; font-size: 14px; }
-    #reader { width: 100%; }
+    #readerWrap { width: 100%; }
+    #reader {
+      width: 100%;
+      min-height: 320px;
+      border-radius: 12px;
+      overflow: hidden;
+      background: #020617;
+    }
+    #reader video, #reader canvas {
+      width: 100% !important;
+      height: 100% !important;
+      object-fit: cover;
+    }
+    .scanner-actions { margin-top: 10px; }
+    .scanner-actions button { flex: 1 1 160px; width: auto; }
+    .debug-panel {
+      margin-top: 12px;
+      border: 1px solid #475569;
+      border-radius: 12px;
+      background: #0f172a;
+      min-height: 220px;
+      display: flex;
+      flex-direction: column;
+    }
+    .debug-summary {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(120px, 1fr));
+      gap: 8px;
+      padding: 10px;
+      border-bottom: 1px solid #1e293b;
+      font-size: 13px;
+    }
+    .debug-row { display: flex; justify-content: space-between; gap: 8px; }
+    .rec-dot {
+      display: inline-block;
+      width: 9px;
+      height: 9px;
+      border-radius: 999px;
+      margin-right: 6px;
+      background: #475569;
+      vertical-align: middle;
+    }
+    .rec-dot--active { background: #ef4444; animation: recPulse 1s infinite; }
+    @keyframes recPulse {
+      0% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.28); opacity: .45; }
+      100% { transform: scale(1); opacity: 1; }
+    }
+    .analysis-warning {
+      margin: 0 10px 10px;
+      padding: 10px;
+      border-radius: 10px;
+      background: rgba(239, 68, 68, .15);
+      border: 1px solid rgba(239, 68, 68, .45);
+      font-weight: 700;
+      color: #fca5a5;
+      display: none;
+    }
+    .analysis-warning.show { display: block; }
+    .debug-log {
+      margin: 0;
+      padding: 10px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace;
+      font-size: 12px;
+      line-height: 1.35;
+      max-height: 180px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+    }
+    .simulate-wrap { margin-top: 10px; }
+    .simulate-wrap input { flex: 1 1 180px; width: auto; }
   </style>
 </head>
 <body>
@@ -114,8 +184,29 @@
       <div class="row" style="margin-top:10px;">
         <button id="manualBtn" class="secondary">Testing: pegar payload manual</button>
       </div>
+      <div class="row scanner-actions">
+        <button id="startScanBtn" class="secondary">Iniciar</button>
+        <button id="stopScanBtn" class="secondary">Detener</button>
+        <button id="switchCamBtn" class="secondary">Cambiar cámara</button>
+      </div>
+      <div class="row simulate-wrap">
+        <input id="simulateInput" placeholder="Simular decodedText" />
+        <button id="simulateBtn" class="secondary">Probar</button>
+      </div>
       <div id="readerWrap" class="row" style="display:none; margin-top:10px;">
         <div id="reader"></div>
+        <div class="debug-panel">
+          <div class="debug-summary">
+            <div class="debug-row"><span>Estado</span><strong id="debugState">idle</strong></div>
+            <div class="debug-row"><span><span id="recDot" class="rec-dot"></span>Analizando</span><strong id="debugAnalysis">NO</strong></div>
+            <div class="debug-row"><span>Frames/seg</span><strong id="debugFps">0</strong></div>
+            <div class="debug-row"><span>Fallas/seg</span><strong id="debugFailureRate">0</strong></div>
+            <div class="debug-row" style="grid-column:1/-1;"><span>Cámara</span><strong id="debugCamera">-</strong></div>
+            <div class="debug-row" style="grid-column:1/-1;"><span>Último error</span><strong id="debugLastError">-</strong></div>
+          </div>
+          <div id="analysisWarning" class="analysis-warning">Se ve la cámara pero no se están analizando frames. Probá reiniciar / cambiar cámara.</div>
+          <pre id="debugLog" class="debug-log"></pre>
+        </div>
       </div>
     </section>
 
