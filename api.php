@@ -258,6 +258,27 @@ function get_or_create_virus_game(PDO $pdo): array {
   ];
 }
 
+function get_or_create_qr_scanner_game(PDO $pdo): array {
+  $stmt = $pdo->prepare('SELECT id, is_active FROM games WHERE code = ? LIMIT 1');
+  $stmt->execute(['qr_scanner']);
+  $row = $stmt->fetch();
+
+  if ($row) {
+    return [
+      'id' => (int) $row['id'],
+      'is_active' => (int) $row['is_active'],
+    ];
+  }
+
+  $ins = $pdo->prepare('INSERT INTO games (code, name, is_active, base_points) VALUES (?, ?, 1, 0)');
+  $ins->execute(['qr_scanner', 'Escáner QR']);
+
+  return [
+    'id' => (int) $pdo->lastInsertId(),
+    'is_active' => 1,
+  ];
+}
+
 function virus_secret(array $config): string {
   $secret = (string) ($config['virus_qr_secret'] ?? $config['admin_token'] ?? 'virus-secret');
   if (strlen($secret) < 16) {
@@ -579,6 +600,7 @@ try {
 }
 
 get_or_create_virus_game($pdo);
+get_or_create_qr_scanner_game($pdo);
 
 try {
   if ($method === 'GET' && $action === 'ping') {
