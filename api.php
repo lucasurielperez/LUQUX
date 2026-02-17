@@ -498,6 +498,30 @@ function db_has_column(PDO $pdo, string $table, string $column): bool {
   return $cache[$key];
 }
 
+function db_table_exists(PDO $pdo, string $table): bool {
+  static $cache = [];
+  if (array_key_exists($table, $cache)) {
+    return $cache[$table];
+  }
+
+  $dbName = (string) $pdo->query('SELECT DATABASE()')->fetchColumn();
+  if ($dbName === '') {
+    $cache[$table] = false;
+    return false;
+  }
+
+  $stmt = $pdo->prepare(
+    'SELECT 1
+     FROM information_schema.TABLES
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
+     LIMIT 1'
+  );
+  $stmt->execute([$dbName, $table]);
+  $cache[$table] = (bool) $stmt->fetchColumn();
+
+  return $cache[$table];
+}
+
 function admin_is_authorized(array $config): bool {
   $token = auth_bearer_token();
   return $token !== '' && hash_equals((string) $config['admin_token'], $token);
@@ -552,16 +576,6 @@ function read_log_tail(string $file, int $lines = 200): array {
     }
   }
   return $rows;
-}
-
-function db_table_exists(PDO $pdo, string $table): bool {
-  try {
-    $stmt = $pdo->prepare('SHOW TABLES LIKE ?');
-    $stmt->execute([$table]);
-    return (bool) $stmt->fetchColumn();
-  } catch (Throwable $e) {
-    return false;
-  }
 }
 
 $action = $_GET['action'] ?? '';
@@ -677,22 +691,44 @@ try {
       $windowHours = 168;
     }
 
-    $activityStmt = $pdo->prepare(
-      "SELECT DISTINCT player_id
-       FROM (
-         SELECT se.player_id
-         FROM score_events se
-         WHERE se.created_at >= (NOW() - INTERVAL ? HOUR)
-         UNION
-         SELECT gp.player_id
-         FROM game_plays gp
-         WHERE gp.created_at >= (NOW() - INTERVAL ? HOUR)
-       ) active_ids"
-    );
-    $activityStmt->execute([$windowHours, $windowHours]);
-    $activeIds = array_map('intval', $activityStmt->fetchAll(PDO::FETCH_COLUMN));
+    $cutoff = (new DateTimeImmutable('now'))
+      ->modify('-' . $windowHours . ' hours')
+      ->format('Y-m-d H:i:s');
+
+    $hasGamePlays = db_table_exists($pdo, 'game_plays');
+    $hasPlayersIsActive = db_has_column($pdo, 'players', 'is_active');
+    $scoreEventsTimeColumn = db_has_column($pdo, 'score_events', 'created_at') ? 'created_at' : null;
+    $gamePlaysTimeColumn = null;
+    if ($hasGamePlays) {
+      if (db_has_column($pdo, 'game_plays', 'created_at')) {
+        $gamePlaysTimeColumn = 'created_at';
+      } elseif (db_has_column($pdo, 'game_plays', 'started_at')) {
+        $gamePlaysTimeColumn = 'started_at';
+      }
+    }
+
+    $activeIds = [];
+    $activityParts = [];
+    $activityParams = [];
+    if ($scoreEventsTimeColumn !== null) {
+      $activityParts[] = "SELECT se.player_id FROM score_events se WHERE se.$scoreEventsTimeColumn >= ?";
+      $activityParams[] = $cutoff;
+    }
+    if ($hasGamePlays && $gamePlaysTimeColumn !== null) {
+      $activityParts[] = "SELECT gp.player_id FROM game_plays gp WHERE gp.$gamePlaysTimeColumn >= ?";
+      $activityParams[] = $cutoff;
+    }
+
+    if (!empty($activityParts)) {
+      $activitySql = "SELECT DISTINCT player_id FROM (" . implode(' UNION ', $activityParts) . ') active_ids';
+      $activityStmt = $pdo->prepare($activitySql);
+      $activityStmt->execute($activityParams);
+      $activeIds = array_map('intval', $activityStmt->fetchAll(PDO::FETCH_COLUMN));
+    }
 
     $activeRows = [];
+    $playersIsActiveFilter = $hasPlayersIsActive ? 'p.is_active = 1' : '1=1';
+
     if (!empty($activeIds)) {
       $placeholders = implode(',', array_fill(0, count($activeIds), '?'));
       $activePlayersStmt = $pdo->prepare(
@@ -706,7 +742,7 @@ try {
            GROUP BY se.player_id
          ) tp ON tp.player_id = p.id
          WHERE p.id IN ($placeholders)
-           AND p.is_active = 1
+           AND $playersIsActiveFilter
          ORDER BY p.id ASC"
       );
       $activePlayersStmt->execute($activeIds);
@@ -724,7 +760,7 @@ try {
            FROM score_events se
            GROUP BY se.player_id
          ) tp ON tp.player_id = p.id
-         WHERE p.is_active = 1
+         WHERE $playersIsActiveFilter
          ORDER BY p.id ASC"
       );
       $activeRows = $fallbackStmt->fetchAll();
