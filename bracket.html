@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="es-AR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <title>Proyector Bracket</title>
+  <style>
+    :root {
+      --bg-1: #09122b;
+      --bg-2: #131f4d;
+      --txt: #ecf3ff;
+      --accent: #7da8ff;
+      --ok: #57ff8f;
+      --warn: #ffaf3f;
+      --card: rgba(7, 16, 44, 0.88);
+      --line: rgba(130, 162, 255, 0.55);
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      font-family: "Inter", "Segoe UI", system-ui, Arial, sans-serif;
+      background: radial-gradient(circle at 20% 20%, #1d2f6f 0%, var(--bg-1) 45%),
+                  radial-gradient(circle at 80% 10%, #2e1f62 0%, var(--bg-2) 55%);
+      color: var(--txt);
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: -30%;
+      background:
+        radial-gradient(circle, rgba(100, 154, 255, 0.14) 0%, transparent 45%) 8% 20% / 30vmin 30vmin repeat,
+        radial-gradient(circle, rgba(126, 204, 255, 0.10) 0%, transparent 55%) 60% 70% / 36vmin 36vmin repeat;
+      animation: drift 20s linear infinite;
+      pointer-events: none;
+    }
+    @keyframes drift { from { transform: translate3d(0, 0, 0);} to {transform: translate3d(5%, -4%, 0);} }
+
+    .screen {
+      height: 100%;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      gap: 1.2vh;
+      padding: 2vh 1.2vw;
+      position: relative;
+      z-index: 1;
+    }
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: .8rem;
+    }
+    .title {
+      margin: 0;
+      font-size: clamp(24px, 4.2vh, 52px);
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      text-shadow: 0 0 20px rgba(126, 204, 255, .45);
+    }
+    .controls { display: flex; gap: .6rem; align-items: center; }
+    .btn {
+      border: 1px solid rgba(151, 181, 255, .55);
+      background: rgba(10, 22, 58, .75);
+      color: #dce8ff;
+      border-radius: 10px;
+      padding: .48rem .8rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .btn:disabled { opacity: .45; cursor: not-allowed; }
+
+    .board {
+      border: 2px solid var(--line);
+      border-radius: 20px;
+      background: rgba(7, 16, 44, .74);
+      box-shadow: 0 14px 44px rgba(0,0,0,.45), inset 0 0 26px rgba(97,140,255,.16);
+      overflow: hidden;
+      display: grid;
+      grid-template-columns: 1fr minmax(180px, 15vw) 1fr;
+      gap: .8vw;
+      align-items: stretch;
+      padding: 1.2vh .7vw;
+      min-height: 0;
+    }
+    .side {
+      display: grid;
+      grid-auto-flow: column;
+      grid-auto-columns: minmax(170px, 1fr);
+      gap: .55vw;
+      overflow: hidden;
+      align-items: stretch;
+    }
+    .center {
+      display: grid;
+      grid-template-rows: 1fr auto auto;
+      justify-items: center;
+      align-items: center;
+      text-align: center;
+      min-width: 0;
+      gap: .8vh;
+    }
+    .trophy {
+      width: min(13vw, 170px);
+      filter: drop-shadow(0 0 26px rgba(255, 203, 109, .45));
+    }
+    .label {
+      font-size: clamp(12px, 1.7vh, 18px);
+      color: #bfd2ff;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+    }
+    .status {
+      font-size: clamp(12px, 1.8vh, 20px);
+      color: #9fd8ff;
+      max-width: 95%;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .round {
+      border: 1px solid rgba(151, 181, 255, .3);
+      border-radius: 12px;
+      padding: .5rem .35rem;
+      background: rgba(8, 20, 58, .52);
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+    .round h3 {
+      margin: 0 0 .35rem 0;
+      font-size: clamp(12px, 1.6vh, 18px);
+      color: #c7d9ff;
+      text-align: center;
+    }
+    .matches {
+      display: flex;
+      flex-direction: column;
+      gap: .45rem;
+      overflow: hidden;
+    }
+    .match {
+      border: 1px solid rgba(114, 145, 230, .45);
+      border-radius: 10px;
+      background: var(--card);
+      padding: .35rem;
+      display: grid;
+      gap: .25rem;
+    }
+    .p { font-size: clamp(11px, 1.5vh, 16px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .vs { color: #93acdf; font-size: clamp(10px, 1.3vh, 14px); }
+    .winner-select {
+      width: 100%;
+      border: 1px solid rgba(151, 181, 255, .45);
+      background: rgba(10, 22, 58, .75);
+      color: #dce8ff;
+      border-radius: 8px;
+      padding: .2rem;
+      font-size: clamp(11px, 1.35vh, 14px);
+    }
+    .dup-badge {
+      display: inline-block;
+      margin-top: .12rem;
+      color: #ffe196;
+      font-size: clamp(10px, 1.2vh, 13px);
+      font-weight: 700;
+    }
+
+    .footer {
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      font-size: clamp(12px, 1.6vh, 18px);
+      color: #b9cdff;
+      align-items: center;
+      min-height: 1.6em;
+    }
+    .ranking {
+      max-width: 75%;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .celebration {
+      position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+      background: radial-gradient(circle at center, rgba(18, 33, 88, .7), rgba(8, 15, 35, .95));
+      z-index: 20; overflow: hidden;
+    }
+    .celebration.show { display: flex; }
+    .celebration-card {
+      text-align: center; padding: 2.5vh 3vw; border: 3px solid rgba(255, 176, 70, .65); border-radius: 22px;
+      background: rgba(15, 28, 75, .82); box-shadow: 0 0 32px rgba(255, 168, 69, .45);
+    }
+    .celebration-top { font-size: clamp(22px, 4.2vh, 56px); font-weight: 900; }
+    .celebration-name { font-size: clamp(28px, 6.5vh, 82px); color: #ffcf68; font-weight: 900; }
+    .confetti-piece { position: absolute; width: 9px; height: 16px; border-radius: 3px; animation: confetti-fall linear forwards; opacity: .95; }
+    @keyframes confetti-fall { from { transform: translateY(-10vh) rotate(0deg); } to { transform: translateY(110vh) rotate(540deg); } }
+  </style>
+</head>
+<body>
+  <div class="screen">
+    <div class="topbar">
+      <h1 class="title">🏆 Bracket Libertadores</h1>
+      <div class="controls">
+        <button id="rebuildBtn" class="btn">Rearmar torneo</button>
+        <button id="applyBtn" class="btn" hidden>Aplicar puntos</button>
+      </div>
+    </div>
+
+    <div class="board">
+      <div id="leftSide" class="side"></div>
+      <div class="center">
+        <img class="trophy" alt="Trofeo" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' x2='1' y1='0' y2='1'%3E%3Cstop offset='0' stop-color='%23ffe08c'/%3E%3Cstop offset='1' stop-color='%23d6931c'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath fill='url(%23g)' d='M78 26h100v26c0 27-12 48-33 63v27h34v26H77v-26h34v-27C90 100 78 79 78 52V26Zm-37 18h29v20c0 21-11 40-29 49V86c9-6 14-14 14-22V44Zm144 0h30v20c0 8 5 16 14 22v27c-18-9-30-28-30-49V44ZM74 188h108v42H74v-42Z'/%3E%3C/svg%3E" />
+        <div class="label">Final + 3er puesto</div>
+        <div id="statusMsg" class="status">Cargando jugadores activos…</div>
+      </div>
+      <div id="rightSide" class="side"></div>
+    </div>
+
+    <div class="footer">
+      <div id="errorMsg"></div>
+      <div id="rankingPreview" class="ranking"></div>
+    </div>
+  </div>
+
+  <div id="celebration" class="celebration" aria-hidden="true">
+    <div id="confettiLayer"></div>
+    <div class="celebration-card">
+      <div class="celebration-top" id="celebrationTop">🏆 CAMPEÓN</div>
+      <div class="celebration-name" id="celebrationName">Jugador</div>
+    </div>
+  </div>
+
+  <script src="bracket.js"></script>
+</body>
+</html>
