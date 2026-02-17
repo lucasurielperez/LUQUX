@@ -580,6 +580,7 @@ $publicActions = [
   'virus_scan',
   'qr_claim',
   'public_leaderboard_top',
+  'public_players_active',
 ];
 
 if (!in_array($action, $publicActions, true) && !admin_is_authorized($config)) {
@@ -665,6 +666,79 @@ try {
       'generated_at' => date('Y-m-d H:i:s'),
       'rows' => $rows,
     ]);
+  }
+
+  if ($method === 'GET' && $action === 'public_players_active') {
+    $windowHours = isset($_GET['hours']) ? (int) $_GET['hours'] : 6;
+    if ($windowHours <= 0) {
+      $windowHours = 6;
+    }
+    if ($windowHours > 168) {
+      $windowHours = 168;
+    }
+
+    $activityStmt = $pdo->prepare(
+      "SELECT DISTINCT player_id
+       FROM (
+         SELECT se.player_id
+         FROM score_events se
+         WHERE se.created_at >= (NOW() - INTERVAL ? HOUR)
+         UNION
+         SELECT gp.player_id
+         FROM game_plays gp
+         WHERE gp.created_at >= (NOW() - INTERVAL ? HOUR)
+       ) active_ids"
+    );
+    $activityStmt->execute([$windowHours, $windowHours]);
+    $activeIds = array_map('intval', $activityStmt->fetchAll(PDO::FETCH_COLUMN));
+
+    $activeRows = [];
+    if (!empty($activeIds)) {
+      $placeholders = implode(',', array_fill(0, count($activeIds), '?'));
+      $activePlayersStmt = $pdo->prepare(
+        "SELECT p.id AS player_id,
+                p.display_name,
+                COALESCE(tp.total_points, 0) AS total_points
+         FROM players p
+         LEFT JOIN (
+           SELECT se.player_id, SUM(se.points_delta) AS total_points
+           FROM score_events se
+           GROUP BY se.player_id
+         ) tp ON tp.player_id = p.id
+         WHERE p.id IN ($placeholders)
+           AND p.is_active = 1
+         ORDER BY p.id ASC"
+      );
+      $activePlayersStmt->execute($activeIds);
+      $activeRows = $activePlayersStmt->fetchAll();
+    }
+
+    if (empty($activeRows)) {
+      $fallbackStmt = $pdo->query(
+        "SELECT p.id AS player_id,
+                p.display_name,
+                COALESCE(tp.total_points, 0) AS total_points
+         FROM players p
+         LEFT JOIN (
+           SELECT se.player_id, SUM(se.points_delta) AS total_points
+           FROM score_events se
+           GROUP BY se.player_id
+         ) tp ON tp.player_id = p.id
+         WHERE p.is_active = 1
+         ORDER BY p.id ASC"
+      );
+      $activeRows = $fallbackStmt->fetchAll();
+    }
+
+    $rows = array_map(static function (array $row): array {
+      return [
+        'player_id' => (int) $row['player_id'],
+        'display_name' => (string) $row['display_name'],
+        'total_points' => (int) $row['total_points'],
+      ];
+    }, $activeRows);
+
+    ok(['rows' => $rows]);
   }
 
   if ($method === 'GET' && $action === 'games') {
