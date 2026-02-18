@@ -1,37 +1,19 @@
 (function () {
   const LOCK_MS = 1500;
   const statusEl = document.getElementById('status');
-  const lastReadEl = document.getElementById('lastRead');
   const startBtn = document.getElementById('startBtn');
   const stopBtn = document.getElementById('stopBtn');
   const switchCamBtn = document.getElementById('switchCamBtn');
-  const simulateInputEl = document.getElementById('simulateInput');
-  const simulateBtn = document.getElementById('simulateBtn');
-  const debugStateEl = document.getElementById('debugState');
-  const debugAnalysisEl = document.getElementById('debugAnalysis');
-  const debugFpsEl = document.getElementById('debugFps');
-  const debugFailureRateEl = document.getElementById('debugFailureRate');
-  const debugCameraEl = document.getElementById('debugCamera');
-  const debugLastErrorEl = document.getElementById('debugLastError');
-  const debugLogEl = document.getElementById('debugLog');
-  const recDotEl = document.getElementById('recDot');
-  const analysisWarningEl = document.getElementById('analysisWarning');
 
   let scanner = null;
   let state = 'idle';
   let cameras = [];
   let selectedCamera = null;
   let selectedCameraIndex = 0;
-  let metricsTimer = null;
-  let failureEventsSinceTick = 0;
-  let decodeEventsSinceTick = 0;
-  let lastAnalysisAt = 0;
-  let lastFailure = '-';
   let busy = false;
   let lastCode = '';
   let lastCodeAt = 0;
   let handlingDecode = false;
-  const logs = [];
 
   function setStatus(message) {
     statusEl.textContent = message;
@@ -50,57 +32,8 @@
     return '';
   }
 
-  function addLog(event, detail) {
-    const ts = new Date().toLocaleTimeString('es-AR', { hour12: false });
-    logs.unshift(`[${ts}] ${event}${detail ? `: ${detail}` : ''}`);
-    if (logs.length > 70) logs.length = 70;
-    debugLogEl.textContent = logs.join('\n');
-  }
-
-  function setState(nextState, detail) {
+  function setState(nextState) {
     state = nextState;
-    debugStateEl.textContent = nextState;
-    addLog(`state=${nextState}`, detail || '');
-  }
-
-  function refreshAnalysisIndicator() {
-    const active = Date.now() - lastAnalysisAt <= 1700;
-    debugAnalysisEl.textContent = active ? 'SI' : 'NO';
-    recDotEl.classList.toggle('rec-dot--active', active);
-    analysisWarningEl.classList.toggle('show', state === 'scanning' && !active);
-  }
-
-  function setLastError(message) {
-    lastFailure = message || '-';
-    debugLastErrorEl.textContent = lastFailure;
-  }
-
-  function updateCameraDebug() {
-    if (!selectedCamera) {
-      debugCameraEl.textContent = '-';
-      return;
-    }
-    debugCameraEl.textContent = `${selectedCamera.id} | ${selectedCamera.label || '(sin label)'}`;
-  }
-
-  function tickMetrics() {
-    const analyzed = failureEventsSinceTick + decodeEventsSinceTick;
-    debugFpsEl.textContent = String(analyzed);
-    debugFailureRateEl.textContent = String(failureEventsSinceTick);
-    failureEventsSinceTick = 0;
-    decodeEventsSinceTick = 0;
-    refreshAnalysisIndicator();
-  }
-
-  function ensureMetricsTimer() {
-    if (metricsTimer) return;
-    metricsTimer = setInterval(tickMetrics, 1000);
-  }
-
-  function clearMetricsTimer() {
-    if (!metricsTimer) return;
-    clearInterval(metricsTimer);
-    metricsTimer = null;
   }
 
   function computeQrbox() {
@@ -126,7 +59,6 @@
   }
 
   async function ensureCameraList() {
-    addLog('cameras', 'solicitando listado');
     cameras = await Html5Qrcode.getCameras();
     if (!Array.isArray(cameras) || cameras.length === 0) {
       throw new Error('No se detectaron cámaras en el dispositivo.');
@@ -136,30 +68,27 @@
       const preferred = cameras.findIndex((cam) => /back|rear|environment/i.test(String(cam.label || '')));
       selectedCameraIndex = preferred >= 0 ? preferred : 0;
       selectedCamera = cameras[selectedCameraIndex];
-    } else {
-      const currentIndex = cameras.findIndex((cam) => cam.id === selectedCamera.id);
-      selectedCameraIndex = currentIndex >= 0 ? currentIndex : 0;
-      selectedCamera = cameras[selectedCameraIndex];
+      return;
     }
 
-    updateCameraDebug();
-    addLog('camera_selected', `${selectedCamera.id} ${selectedCamera.label || ''}`);
+    const currentIndex = cameras.findIndex((cam) => cam.id === selectedCamera.id);
+    selectedCameraIndex = currentIndex >= 0 ? currentIndex : 0;
+    selectedCamera = cameras[selectedCameraIndex];
   }
 
-  async function stopScanner(options = {}) {
+  async function stopScanner() {
     if (state !== 'scanning' && state !== 'starting') {
       return;
     }
 
-    setState('stopping', options.reason || 'stop solicitado');
+    setState('stopping');
 
     try {
       if (scanner && scanner.isScanning) {
         await scanner.stop();
       }
     } catch (err) {
-      setLastError(`Error al detener: ${err.message}`);
-      addLog('stop_error', err.message);
+      setStatus(`Error al detener: ${err.message}`);
     }
 
     try {
@@ -167,12 +96,10 @@
         await scanner.clear();
       }
     } catch (err) {
-      addLog('clear_error', err.message);
+      setStatus(`Error al limpiar: ${err.message}`);
     }
 
-    clearMetricsTimer();
-    setState('idle', 'scanner detenido');
-    refreshAnalysisIndicator();
+    setState('idle');
   }
 
   async function redirectToClaim(code) {
@@ -181,9 +108,8 @@
     const finalClaimUrl = `${claimPath}?code=${encodeURIComponent(code)}`;
 
     busy = true;
-    setStatus(`QR detectado: ${code}`);
-    addLog('redirect', finalClaimUrl);
-    await stopScanner({ reason: 'QR detectado' });
+    setStatus('QR detectado. Redirigiendo…');
+    await stopScanner();
     await new Promise((resolve) => setTimeout(resolve, 300));
     window.location.href = finalClaimUrl;
   }
@@ -195,7 +121,6 @@
     const code = extractCode(decodedText);
     if (!code) {
       setStatus('QR sin code válido. Probá con otro QR.');
-      setLastError('QR sin code válido');
       handlingDecode = false;
       return;
     }
@@ -213,17 +138,12 @@
 
     lastCode = code;
     lastCodeAt = now;
-    decodeEventsSinceTick += 1;
-    lastAnalysisAt = Date.now();
-    lastReadEl.textContent = `Último QR: ${code}`;
-    addLog('decoded', code);
     await redirectToClaim(code);
     handlingDecode = false;
   }
 
   async function startScanner() {
     if (state !== 'idle') {
-      addLog('start_skip', `estado=${state}`);
       return;
     }
     if (busy) {
@@ -231,8 +151,7 @@
       return;
     }
 
-    setState('starting', 'iniciando cámara');
-    ensureMetricsTimer();
+    setState('starting');
 
     try {
       await ensureCameraList();
@@ -247,7 +166,6 @@
         qrbox,
         aspectRatio: 1.333334,
       };
-      addLog('start_config', JSON.stringify({ qrbox, fps: config.fps, camera: selectedCamera.id }));
 
       await scanner.start(
         { deviceId: { exact: selectedCamera.id } },
@@ -255,24 +173,16 @@
         (decodedText) => {
           handleDecodedText(decodedText);
         },
-        (errorMessage) => {
-          failureEventsSinceTick += 1;
-          lastAnalysisAt = Date.now();
-          if (errorMessage && errorMessage !== lastFailure) {
-            setLastError(errorMessage);
-          }
+        () => {
+          // callback de error intencionalmente vacío para evitar ruido visual
         }
       );
 
-      setState('scanning', 'scanner activo');
+      setState('scanning');
       setStatus('Cámara activa. Apuntá al QR.');
-      setLastError('-');
     } catch (err) {
-      clearMetricsTimer();
-      setLastError(err.message);
       setStatus(`No se pudo abrir cámara: ${err.message}`);
-      addLog('start_error', err.message);
-      setState('idle', 'falló start');
+      setState('idle');
     }
   }
 
@@ -281,18 +191,14 @@
       await ensureCameraList();
       selectedCameraIndex = (selectedCameraIndex + 1) % cameras.length;
       selectedCamera = cameras[selectedCameraIndex];
-      updateCameraDebug();
-      addLog('switch_camera', `${selectedCamera.id} ${selectedCamera.label || ''}`);
 
       const wasScanning = state === 'scanning';
       if (wasScanning) {
-        await stopScanner({ reason: 'cambio de cámara' });
+        await stopScanner();
       }
       await startScanner();
     } catch (err) {
-      setLastError(err.message);
       setStatus(`No se pudo cambiar cámara: ${err.message}`);
-      addLog('switch_error', err.message);
     }
   }
 
@@ -309,24 +215,12 @@
     switchCamera();
   });
 
-  simulateBtn.addEventListener('click', async () => {
-    const fakeText = String(simulateInputEl.value || '').trim();
-    if (!fakeText) {
-      setStatus('Ingresá un texto para simular decodedText.');
-      return;
-    }
-    addLog('simulate', fakeText);
-    await handleDecodedText(fakeText);
-  });
-
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
       setStatus('Volviste al escáner. Tocá “Iniciar” si no se activó la cámara.');
     }
   });
 
-  setState('idle', 'esperando interacción del usuario');
-  setLastError('-');
+  setState('idle');
   setStatus('Listo para iniciar cámara.');
-  addLog('ready', 'Iniciar debe tocarse manualmente para iOS.');
 })();
