@@ -9,11 +9,8 @@
       --bg-1: #09122b;
       --bg-2: #131f4d;
       --txt: #ecf3ff;
-      --accent: #7da8ff;
-      --ok: #57ff8f;
-      --warn: #ffaf3f;
-      --card: rgba(7, 16, 44, 0.88);
       --line: rgba(130, 162, 255, 0.55);
+      --card: rgba(7, 16, 44, 0.88);
     }
     * { box-sizing: border-box; }
     html, body {
@@ -41,7 +38,7 @@
     .screen {
       height: 100%;
       display: grid;
-      grid-template-rows: auto 1fr auto;
+      grid-template-rows: auto minmax(0, 1fr) auto;
       gap: 1.2vh;
       padding: 2vh 1.2vw;
       position: relative;
@@ -77,79 +74,95 @@
       border-radius: 20px;
       background: rgba(7, 16, 44, .74);
       box-shadow: 0 14px 44px rgba(0,0,0,.45), inset 0 0 26px rgba(97,140,255,.16);
-      overflow: hidden;
-      display: grid;
-      grid-template-columns: 1fr minmax(180px, 15vw) 1fr;
-      gap: .8vw;
-      align-items: stretch;
-      padding: 1.2vh .7vw;
       min-height: 0;
-    }
-    .side {
-      display: grid;
-      grid-auto-flow: column;
-      grid-auto-columns: minmax(170px, 1fr);
-      gap: .55vw;
+      position: relative;
       overflow: hidden;
-      align-items: stretch;
-    }
-    .center {
-      display: grid;
-      grid-template-rows: 1fr auto auto;
-      justify-items: center;
-      align-items: center;
-      text-align: center;
-      min-width: 0;
-      gap: .8vh;
-    }
-    .trophy {
-      width: min(13vw, 170px);
-      filter: drop-shadow(0 0 26px rgba(255, 203, 109, .45));
-    }
-    .label {
-      font-size: clamp(12px, 1.7vh, 18px);
-      color: #bfd2ff;
-      text-transform: uppercase;
-      letter-spacing: .06em;
-    }
-    .status {
-      font-size: clamp(12px, 1.8vh, 20px);
-      color: #9fd8ff;
-      max-width: 95%;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
     }
 
-    .round {
+    .bracket-scroll {
+      overflow-x: auto;
+      overflow-y: auto;
+      height: 100%;
+      min-height: 100%;
+      padding: 1.2vh 1vw 20px;
+      scrollbar-color: rgba(130, 162, 255, 0.8) rgba(9, 18, 43, 0.6);
+      scrollbar-width: thin;
+    }
+
+    .bracket-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 40px;
+      min-height: 100%;
+      width: max-content;
+      padding-right: 2.2vw;
+    }
+
+    .board::before,
+    .board::after {
+      content: "";
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 36px;
+      pointer-events: none;
+      z-index: 2;
+    }
+    .board::before {
+      left: 0;
+      background: linear-gradient(to right, rgba(7, 16, 44, .9), rgba(7, 16, 44, 0));
+    }
+    .board::after {
+      right: 0;
+      background: linear-gradient(to left, rgba(7, 16, 44, .9), rgba(7, 16, 44, 0));
+    }
+
+    .round-column {
+      width: clamp(210px, 16vw, 270px);
       border: 1px solid rgba(151, 181, 255, .3);
       border-radius: 12px;
-      padding: .5rem .35rem;
+      padding: .6rem .45rem;
       background: rgba(8, 20, 58, .52);
       display: flex;
       flex-direction: column;
-      min-height: 0;
+      min-height: 120px;
     }
-    .round h3 {
-      margin: 0 0 .35rem 0;
-      font-size: clamp(12px, 1.6vh, 18px);
+
+    .round-column h3 {
+      margin: 0 0 .45rem 0;
+      font-size: clamp(13px, 1.8vh, 19px);
       color: #c7d9ff;
       text-align: center;
+      position: sticky;
+      top: 0;
+      background: rgba(8, 20, 58, .95);
+      border-radius: 8px;
+      padding: .25rem;
+      z-index: 1;
     }
+
     .matches {
       display: flex;
       flex-direction: column;
-      gap: .45rem;
-      overflow: hidden;
+      min-height: 100%;
     }
+
     .match {
       border: 1px solid rgba(114, 145, 230, .45);
       border-radius: 10px;
       background: var(--card);
-      padding: .35rem;
+      padding: .42rem;
+      min-height: 98px;
       display: grid;
-      gap: .25rem;
+      gap: .28rem;
+      align-content: center;
     }
+
+    .match.compact {
+      min-height: 90px;
+      padding: .32rem;
+    }
+
     .p { font-size: clamp(11px, 1.5vh, 16px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .vs { color: #93acdf; font-size: clamp(10px, 1.3vh, 14px); }
     .winner-select {
@@ -161,12 +174,36 @@
       padding: .2rem;
       font-size: clamp(11px, 1.35vh, 14px);
     }
+
     .dup-badge {
       display: inline-block;
       margin-top: .12rem;
       color: #ffe196;
       font-size: clamp(10px, 1.2vh, 13px);
       font-weight: 700;
+    }
+
+    .final-trophy {
+      margin: 1rem auto .2rem;
+      text-align: center;
+    }
+    .trophy {
+      width: clamp(84px, 9vw, 128px);
+      filter: drop-shadow(0 0 26px rgba(255, 203, 109, .45));
+      animation: trophy-glow 2s ease-in-out infinite alternate;
+    }
+    @keyframes trophy-glow {
+      from { filter: drop-shadow(0 0 10px rgba(255, 203, 109, .2)); }
+      to { filter: drop-shadow(0 0 30px rgba(255, 203, 109, .7)); }
+    }
+
+    .status {
+      font-size: clamp(12px, 1.8vh, 20px);
+      color: #9fd8ff;
+      max-width: 95%;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     .footer {
@@ -212,17 +249,14 @@
     </div>
 
     <div class="board">
-      <div id="leftSide" class="side"></div>
-      <div class="center">
-        <img class="trophy" alt="Trofeo" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' x2='1' y1='0' y2='1'%3E%3Cstop offset='0' stop-color='%23ffe08c'/%3E%3Cstop offset='1' stop-color='%23d6931c'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath fill='url(%23g)' d='M78 26h100v26c0 27-12 48-33 63v27h34v26H77v-26h34v-27C90 100 78 79 78 52V26Zm-37 18h29v20c0 21-11 40-29 49V86c9-6 14-14 14-22V44Zm144 0h30v20c0 8 5 16 14 22v27c-18-9-30-28-30-49V44ZM74 188h108v42H74v-42Z'/%3E%3C/svg%3E" />
-        <div class="label">Final + 3er puesto</div>
-        <div id="statusMsg" class="status">Cargando jugadores activos…</div>
+      <div class="bracket-scroll" id="bracketScroll">
+        <div class="bracket-row" id="bracketRow"></div>
       </div>
-      <div id="rightSide" class="side"></div>
     </div>
 
     <div class="footer">
       <div id="errorMsg"></div>
+      <div id="statusMsg" class="status">Cargando jugadores activos…</div>
       <div id="rankingPreview" class="ranking"></div>
     </div>
   </div>
