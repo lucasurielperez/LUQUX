@@ -4,6 +4,8 @@
   const startBtn = document.getElementById('startBtn');
   const stopBtn = document.getElementById('stopBtn');
   const switchCamBtn = document.getElementById('switchCamBtn');
+  const resultBox = document.getElementById('resultBox');
+  const resumeBtn = document.getElementById('resumeBtn');
 
   let scanner = null;
   let state = 'idle';
@@ -11,9 +13,11 @@
   let selectedCamera = null;
   let selectedCameraIndex = 0;
   let busy = false;
+  let busyClaim = false;
   let lastCode = '';
   let lastCodeAt = 0;
   let handlingDecode = false;
+  let scannerPausedByClaim = false;
 
   function setStatus(message) {
     statusEl.textContent = message;
@@ -34,6 +38,22 @@
 
   function setState(nextState) {
     state = nextState;
+  }
+
+  function setResult(content, isError = false) {
+    if (!resultBox) return;
+    resultBox.classList.toggle('bad', Boolean(isError));
+    if (typeof content === 'string' && /<[^>]+>/.test(content)) {
+      resultBox.innerHTML = content;
+      return;
+    }
+    resultBox.textContent = content == null ? '' : String(content);
+  }
+
+  function clearResult() {
+    if (!resultBox) return;
+    resultBox.classList.remove('bad');
+    resultBox.textContent = '';
   }
 
   function computeQrbox() {
@@ -114,6 +134,88 @@
     window.location.href = finalClaimUrl;
   }
 
+  function resolveRedirect(ru) {
+    const basePath = inferBasePath();
+    const scannerPath = `${basePath}/admin/qr_scanner.html`;
+
+    if (!ru) return scannerPath;
+    if (ru.startsWith('pcn.com.ar/')) return `https://${ru}`;
+    if (ru.startsWith('//')) return `${window.location.protocol}${ru}`;
+    if (ru.startsWith('/')) return `${window.location.origin}${ru}`;
+    return new URL(ru, window.location.href).toString();
+  }
+
+  async function claimInline(code) {
+    if (busyClaim) return;
+
+    busyClaim = true;
+    setResult('Procesando…');
+    setStatus('Canjeando QR…');
+
+    scannerPausedByClaim = false;
+    if (scanner && typeof scanner.pause === 'function') {
+      scanner.pause(true);
+      scannerPausedByClaim = true;
+    }
+
+    const claim = async (extraPayload = {}) => {
+      const res = await fetch('api.php?action=qr_claim', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code, ...extraPayload })
+      });
+      const data = await res.json();
+      return { res, data };
+    };
+
+    try {
+      let { res, data } = await claim();
+
+      if ((!res.ok || !data.ok) && data.code === 'PLAYER_REQUIRED') {
+        const player = await window.PlayerContext.ensureActivePlayerForThisDevice();
+        ({ res, data } = await claim({ player_id: player.id, player_token: player.player_token }));
+      }
+
+      if (!res.ok || !data.ok) {
+        if (data.code === 'ALREADY_CLAIMED') {
+          setResult('Ya canjeaste este QR');
+        } else {
+          setResult(data.error || 'No se pudo canjear el QR', true);
+        }
+      } else if (data.qr_type === 'secret') {
+        const pts = Number(data.applied_points || 0);
+        setResult(`
+          <div style="font-size:44px;font-weight:800;margin:8px 0;">${pts > 0 ? '+' : ''}${pts}</div>
+          <div>QR secreto canjeado</div>
+        `);
+      } else if (data.qr_type === 'game') {
+        const finalUrl = resolveRedirect(data.redirect_url);
+        setResult(`
+          <div>Juego desbloqueado</div>
+          <button id="goGameBtn" style="margin-top:10px;">Ir al juego</button>
+        `);
+        const goGameBtn = document.getElementById('goGameBtn');
+        if (goGameBtn) {
+          goGameBtn.addEventListener('click', () => {
+            window.location.href = finalUrl;
+          });
+        }
+      } else {
+        setResult('Respuesta desconocida', true);
+      }
+
+      if (resumeBtn) {
+        resumeBtn.style.display = 'block';
+      }
+    } catch (_err) {
+      busyClaim = false;
+      await redirectToClaim(code);
+      return;
+    }
+
+    busyClaim = false;
+  }
+
   async function handleDecodedText(decodedText) {
     if (handlingDecode) return;
     handlingDecode = true;
@@ -131,14 +233,14 @@
       return;
     }
 
-    if (busy) {
+    if (busy || busyClaim) {
       handlingDecode = false;
       return;
     }
 
     lastCode = code;
     lastCodeAt = now;
-    await redirectToClaim(code);
+    await claimInline(code);
     handlingDecode = false;
   }
 
@@ -214,6 +316,18 @@
   switchCamBtn.addEventListener('click', () => {
     switchCamera();
   });
+
+  if (resumeBtn) {
+    resumeBtn.addEventListener('click', () => {
+      clearResult();
+      resumeBtn.style.display = 'none';
+      if (scannerPausedByClaim && scanner && typeof scanner.resume === 'function') {
+        scanner.resume();
+      }
+      scannerPausedByClaim = false;
+      setStatus('Cámara activa. Apuntá al QR.');
+    });
+  }
 
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
