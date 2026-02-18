@@ -45,10 +45,18 @@
       z-index: 1;
     }
     .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 6;
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: .8rem;
+      background: rgba(9, 18, 43, .85);
+      border: 1px solid rgba(130, 162, 255, 0.25);
+      border-radius: 12px;
+      padding: .5rem .65rem;
+      backdrop-filter: blur(4px);
     }
     .tournament-input-wrap {
       position: absolute;
@@ -81,6 +89,18 @@
       text-shadow: 0 0 20px rgba(126, 204, 255, .45);
     }
     .controls { display: flex; gap: .6rem; align-items: center; }
+    .meta {
+      font-size: clamp(12px, 1.6vh, 18px);
+      color: #c2d4ff;
+      font-weight: 700;
+    }
+    .btn.reset-btn {
+      font-size: clamp(14px, 1.8vh, 20px);
+      padding: .58rem 1rem;
+      border-color: rgba(255, 188, 114, 0.7);
+      background: rgba(72, 34, 18, 0.7);
+      color: #ffdcb8;
+    }
     .btn {
       border: 1px solid rgba(151, 181, 255, .55);
       background: rgba(10, 22, 58, .75);
@@ -204,6 +224,29 @@
       color: #ffe196;
       font-size: clamp(10px, 1.2vh, 13px);
       font-weight: 700;
+    }
+
+    .lucky-controls {
+      border-top: 1px dashed rgba(255, 206, 143, .45);
+      margin-top: .25rem;
+      padding-top: .25rem;
+      display: grid;
+      gap: .22rem;
+    }
+    .lucky-row {
+      display: grid;
+      grid-template-columns: 64px 1fr;
+      align-items: center;
+      gap: .2rem;
+    }
+    .lucky-row label {
+      font-size: clamp(10px, 1.2vh, 12px);
+      color: #ffd9a4;
+      font-weight: 700;
+    }
+    .lucky-hint {
+      font-size: clamp(10px, 1.2vh, 12px);
+      color: #ffd9a4;
     }
 
     .final-trophy {
@@ -331,8 +374,10 @@
     </div>
     <div class="topbar">
       <h1 id="tournamentTitle" class="title">🏆 TORNEO SIN NOMBRE</h1>
+      <div class="meta" id="playerCount">0 jugadores</div>
       <div class="controls">
-        <button id="rebuildBtn" class="btn">Rearmar torneo</button>
+        <button id="resetBtn" class="btn reset-btn">🔄 Reset torneo</button>
+        <button id="rebuildBtn" class="btn">Rearmar jugadores activos</button>
         <button id="applyBtn" class="btn" hidden>Aplicar puntos</button>
       </div>
     </div>

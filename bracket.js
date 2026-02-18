@@ -10,9 +10,11 @@
   const errorMsgEl = document.getElementById('errorMsg');
   const rankingPreviewEl = document.getElementById('rankingPreview');
   const rebuildBtn = document.getElementById('rebuildBtn');
+  const resetBtn = document.getElementById('resetBtn');
   const applyBtn = document.getElementById('applyBtn');
   const tournamentNameInputEl = document.getElementById('tournamentNameInput');
   const tournamentTitleEl = document.getElementById('tournamentTitle');
+  const playerCountEl = document.getElementById('playerCount');
 
   const celebrationEl = document.getElementById('celebration');
   const celebrationTopEl = document.getElementById('celebrationTop');
@@ -83,14 +85,6 @@
     return pairs;
   }
 
-  function pickDuplicateCandidate(candidates, excludedPlayerId) {
-    const validCandidates = candidates.filter(function (p) {
-      return p && p.player_id !== excludedPlayerId;
-    });
-    if (!validCandidates.length) return null;
-    return validCandidates[Math.floor(Math.random() * validCandidates.length)];
-  }
-
   function generateRoundSizes(playerCount) {
     const rounds = [];
     let currentPlayers = playerCount;
@@ -127,6 +121,12 @@
     if (!('applied_at' in currentState)) {
       currentState.applied_at = currentState.bracket_applied_at || null;
     }
+    if (!currentState.lucky || typeof currentState.lucky !== 'object') {
+      currentState.lucky = { picks: {} };
+    }
+    if (!currentState.lucky.picks || typeof currentState.lucky.picks !== 'object') {
+      currentState.lucky.picks = {};
+    }
     currentState.third_place_match = undefined;
     currentState.bracket_applied_at = undefined;
   }
@@ -145,35 +145,10 @@
       playerMap[p.player_id] = p;
     });
 
-    let duplicatedPlayerId = null;
-    let round1Pairs = [];
-
-    if (players.length % 2 === 0) {
-      round1Pairs = chunkPairs(players);
-    } else {
-      const oddPlayer = players[players.length - 1];
-      const basePlayers = players.slice(0, -1);
-      round1Pairs = chunkPairs(basePlayers);
-
-      const leftMatchCount = Math.ceil(round1Pairs.length / 2);
-      const leftPlayers = [];
-      for (let i = 0; i < leftMatchCount; i += 1) {
-        leftPlayers.push(round1Pairs[i][0], round1Pairs[i][1]);
-      }
-
-      const duplicateCandidate = pickDuplicateCandidate(leftPlayers, oddPlayer.player_id);
-      if (!duplicateCandidate) {
-        throw new Error('No se pudo construir llave impar con duplicado válido.');
-      }
-      duplicatedPlayerId = duplicateCandidate.player_id;
-      round1Pairs.push([oddPlayer, duplicateCandidate]);
-    }
+    const round1Pairs = chunkPairs(players);
 
     const roundSizes = generateRoundSizes(players.length);
     const rounds = [];
-    const duplicatedByRound = {
-      0: duplicatedPlayerId ? [duplicatedPlayerId] : [],
-    };
 
     const round1Matches = round1Pairs.map(function (pair, idx) {
       return {
@@ -208,9 +183,8 @@
       generated_at: new Date().toISOString(),
       players,
       players_by_id: playerMap,
-      duplicated_player_id: duplicatedPlayerId,
-      duplicated_by_round: duplicatedByRound,
       rounds,
+      lucky: { picks: {} },
       thirdPlace: createEmptyThirdPlace(),
       awards: [],
       applied_at: null,
@@ -292,12 +266,6 @@
 
   function syncRounds(currentState) {
     ensureStateShape(currentState);
-    currentState.duplicated_by_round = currentState.duplicated_by_round || {};
-    Object.keys(currentState.duplicated_by_round).forEach(function (roundKey) {
-      if (Number(roundKey) > 0) {
-        currentState.duplicated_by_round[roundKey] = [];
-      }
-    });
 
     for (let r = 1; r < currentState.rounds.length; r += 1) {
       currentState.rounds[r].forEach(function (m) {
@@ -316,22 +284,6 @@
         }
       });
 
-      const previousRoundMatches = currentState.rounds[r - 1];
-      if (previousRoundMatches.length % 2 !== 0) {
-        const carryMatch = currentState.rounds[r][currentState.rounds[r].length - 1];
-        if (carryMatch && carryMatch.player1_id && !carryMatch.player2_id) {
-          const previousWinners = previousRoundMatches.map(function (m) {
-            return m.winner_id ? getPlayerFromState(currentState, m.winner_id) : null;
-          }).filter(Boolean);
-
-          const duplicateCandidate = pickDuplicateCandidate(previousWinners, carryMatch.player1_id);
-          if (duplicateCandidate) {
-            carryMatch.player2_id = duplicateCandidate.player_id;
-            currentState.duplicated_by_round[r] = [duplicateCandidate.player_id];
-          }
-        }
-      }
-
       currentState.rounds[r].forEach(function (match) {
         if (match.player1_id === match.player2_id) {
           match.player2_id = null;
@@ -342,8 +294,72 @@
       });
     }
 
+    syncLuckyLosers(currentState);
+
     buildThirdPlaceMatch(currentState);
     currentState.awards = computeAwards(currentState);
+  }
+
+  function getLuckyCandidates(currentState, roundIndex, oddPlayerId) {
+    const round = Array.isArray(currentState.rounds[roundIndex]) ? currentState.rounds[roundIndex] : [];
+    const candidates = [];
+    round.forEach(function (match) {
+      if (!match || !match.player1_id || !match.player2_id || !match.winner_id) return;
+      if (match.winner_id !== match.player1_id && match.winner_id !== match.player2_id) return;
+      const loserId = match.winner_id === match.player1_id ? match.player2_id : match.player1_id;
+      if (!loserId || loserId === oddPlayerId) return;
+      if (!candidates.includes(loserId)) {
+        candidates.push(loserId);
+      }
+    });
+
+    candidates.sort(function (a, b) {
+      const pa = getDeterministicPlayerSortValue(currentState, a);
+      const pb = getDeterministicPlayerSortValue(currentState, b);
+      if (pb.total_points !== pa.total_points) return pb.total_points - pa.total_points;
+      return pa.display_name.localeCompare(pb.display_name, 'es');
+    });
+
+    return candidates;
+  }
+
+  function syncLuckyLosers(currentState) {
+    const picks = currentState.lucky.picks || {};
+    const nextPicks = {};
+
+    currentState.rounds.forEach(function (round, roundIndex) {
+      const oddMatch = round.find(function (match) {
+        return !!((match.player1_id && !match.player2_id) || (!match.player1_id && match.player2_id));
+      });
+
+      if (!oddMatch) return;
+      const oddPlayerId = oddMatch.player1_id || oddMatch.player2_id;
+      const pick = picks[roundIndex] || {};
+      const prevLuckyId = pick.lucky_loser_id ? Number(pick.lucky_loser_id) : null;
+      const mode = pick.mode === 'manual' ? 'manual' : 'auto';
+      const candidates = getLuckyCandidates(currentState, roundIndex, oddPlayerId);
+
+      let luckyId = null;
+      if (mode === 'manual' && prevLuckyId && candidates.includes(prevLuckyId) && prevLuckyId !== oddPlayerId) {
+        luckyId = prevLuckyId;
+      } else if (candidates.length) {
+        luckyId = candidates[0];
+      }
+
+      oddMatch.player1_id = oddPlayerId;
+      oddMatch.player2_id = luckyId;
+      if (oddMatch.winner_id !== oddMatch.player1_id && oddMatch.winner_id !== oddMatch.player2_id) {
+        oddMatch.winner_id = null;
+      }
+
+      nextPicks[roundIndex] = {
+        odd_player_id: oddPlayerId,
+        lucky_loser_id: luckyId,
+        mode: (mode === 'manual' && luckyId) ? 'manual' : 'auto',
+      };
+    });
+
+    currentState.lucky.picks = nextPicks;
   }
 
   function getPlayer(id) {
@@ -361,24 +377,74 @@
     const p2 = getPlayer(match.player2_id);
     const canPick = Boolean(p1 && p2);
 
-    const duplicatedInRound = state.duplicated_by_round && Array.isArray(state.duplicated_by_round[match.round_index])
-      ? state.duplicated_by_round[match.round_index]
-      : [];
-    const duplicateBadgeP1 = duplicatedInRound.includes(match.player1_id) ? '<span class="dup-badge">⚠ juega 2 veces</span>' : '';
-    const duplicateBadgeP2 = duplicatedInRound.includes(match.player2_id) ? '<span class="dup-badge">⚠ juega 2 veces</span>' : '';
-
     const editDisabled = opts.disableWinnerEdit ? 'disabled' : '';
+
+    const luckyUi = getLuckyUiModel(match.round_index, match.match_index, match.player1_id, match.player2_id);
+    const luckyBadgeP1 = luckyUi && luckyUi.oddPlayerId === match.player1_id ? '<span class="dup-badge">⚠ Ronda impar</span>' : '';
+    const luckyBadgeP2 = luckyUi && luckyUi.luckyLoserId === match.player2_id ? '<span class="dup-badge">Lucky Loser 🧟‍♂️</span>' : '';
 
     return `
       <div class="match ${opts.compact ? 'compact' : ''}" style="margin-top:${opts.marginTopPx}px;">
-        <div class="p" title="${p1 ? escapeHtml(p1.display_name) : 'Sin definir'}">${p1 ? escapeHtml(p1.display_name) : '—'} ${duplicateBadgeP1}</div>
+        <div class="p" title="${p1 ? escapeHtml(p1.display_name) : 'Sin definir'}">${p1 ? escapeHtml(p1.display_name) : '—'} ${luckyBadgeP1}</div>
         <div class="vs">vs</div>
-        <div class="p" title="${p2 ? escapeHtml(p2.display_name) : 'Sin definir'}">${p2 ? escapeHtml(p2.display_name) : '—'} ${duplicateBadgeP2}</div>
+        <div class="p" title="${p2 ? escapeHtml(p2.display_name) : 'Sin definir'}">${p2 ? escapeHtml(p2.display_name) : '—'} ${luckyBadgeP2}</div>
         <select class="winner-select" data-round="${match.round_index}" data-match="${match.match_index}" ${(!canPick || editDisabled) ? 'disabled' : ''}>
           <option value="">Ganador…</option>
           ${p1 ? `<option value="${p1.player_id}" ${match.winner_id === p1.player_id ? 'selected' : ''}>${escapeHtml(p1.display_name)}</option>` : ''}
           ${p2 ? `<option value="${p2.player_id}" ${match.winner_id === p2.player_id ? 'selected' : ''}>${escapeHtml(p2.display_name)}</option>` : ''}
         </select>
+        ${luckyUi ? renderLuckyControls(luckyUi) : ''}
+      </div>
+    `;
+  }
+
+  function getLuckyUiModel(roundIndex, matchIndex, player1Id, player2Id) {
+    const pick = state && state.lucky && state.lucky.picks ? state.lucky.picks[roundIndex] : null;
+    if (!pick || !pick.odd_player_id) return null;
+    const oddId = Number(pick.odd_player_id);
+    if (player1Id !== oddId && player2Id !== oddId) return null;
+
+    const oddPlayerId = oddId;
+    const candidates = getLuckyCandidates(state, roundIndex, oddPlayerId);
+    const luckyLoserId = pick.lucky_loser_id ? Number(pick.lucky_loser_id) : null;
+
+    return {
+      roundIndex,
+      matchIndex,
+      mode: pick.mode === 'manual' ? 'manual' : 'auto',
+      oddPlayerId,
+      luckyLoserId,
+      candidates,
+    };
+  }
+
+  function renderLuckyControls(luckyUi) {
+    const options = luckyUi.candidates.map(function (candidateId) {
+      const p = getPlayer(candidateId);
+      if (!p) return '';
+      return `<option value="${candidateId}" ${luckyUi.luckyLoserId === candidateId ? 'selected' : ''}>${escapeHtml(p.display_name)}</option>`;
+    }).join('');
+
+    const selectDisabled = luckyUi.mode !== 'manual' || !luckyUi.candidates.length;
+    const msg = luckyUi.candidates.length ? '' : '<div class="lucky-hint">Definí otros partidos para habilitar Lucky Loser</div>';
+
+    return `
+      <div class="lucky-controls">
+        <div class="lucky-row">
+          <label>Modo</label>
+          <select class="winner-select lucky-mode" data-lucky-mode-round="${luckyUi.roundIndex}">
+            <option value="auto" ${luckyUi.mode === 'auto' ? 'selected' : ''}>Auto</option>
+            <option value="manual" ${luckyUi.mode === 'manual' ? 'selected' : ''}>Manual</option>
+          </select>
+        </div>
+        <div class="lucky-row">
+          <label>Lucky Loser</label>
+          <select class="winner-select lucky-pick" data-lucky-pick-round="${luckyUi.roundIndex}" ${selectDisabled ? 'disabled' : ''}>
+            <option value="">Elegí perdedor…</option>
+            ${options}
+          </select>
+        </div>
+        ${msg}
       </div>
     `;
   }
@@ -665,6 +731,10 @@
       errorMsgEl.textContent = `Puntos ya aplicados el ${new Date(state.applied_at).toLocaleString('es-AR')}.`;
     }
 
+    if (playerCountEl) {
+      playerCountEl.textContent = `${state.players.length} jugadores`;
+    }
+
     renderRankingPreview();
     updateApplyButton();
 
@@ -819,6 +889,38 @@
         return;
       }
 
+      if (t.dataset.luckyModeRound) {
+        const roundIndex = Number(t.dataset.luckyModeRound);
+        const pick = state.lucky.picks[roundIndex] || {};
+        pick.mode = t.value === 'manual' ? 'manual' : 'auto';
+        if (pick.mode === 'auto') {
+          pick.lucky_loser_id = null;
+        }
+        state.lucky.picks[roundIndex] = pick;
+        syncRounds(state);
+        saveState();
+        renderBracket();
+        return;
+      }
+
+      if (t.dataset.luckyPickRound) {
+        const roundIndex = Number(t.dataset.luckyPickRound);
+        const pick = state.lucky.picks[roundIndex] || {};
+        const luckyId = t.value ? Number(t.value) : null;
+        const candidates = pick.odd_player_id ? getLuckyCandidates(state, roundIndex, Number(pick.odd_player_id)) : [];
+        if (!luckyId || !candidates.includes(luckyId)) {
+          errorMsgEl.textContent = 'Lucky Loser inválido para esta ronda.';
+          return;
+        }
+        pick.mode = 'manual';
+        pick.lucky_loser_id = luckyId;
+        state.lucky.picks[roundIndex] = pick;
+        syncRounds(state);
+        saveState();
+        renderBracket();
+        return;
+      }
+
       if (!t.dataset.round || !t.dataset.match) return;
       const roundIndex = Number(t.dataset.round);
       const matchIndex = Number(t.dataset.match);
@@ -830,6 +932,20 @@
       if (!window.confirm('¿Rearmar torneo desde cero?')) return;
       await initializeTournament(true);
     });
+
+    if (resetBtn) {
+      resetBtn.addEventListener('click', async function () {
+        let warning = 'Esto borra el torneo actual y todos los resultados. ¿Continuar?';
+        if (state && state.applied_at) {
+          warning += '\n\nYa aplicaste puntos. Resetear NO revierte puntos ya otorgados.';
+        }
+        if (!window.confirm(warning)) return;
+
+        state = null;
+        localStorage.removeItem(STATE_KEY);
+        await initializeTournament(true);
+      });
+    }
 
     applyBtn.addEventListener('click', function () {
       applyAwardsToBackend();
