@@ -15,35 +15,36 @@
       touch-action: manipulation;
     }
     main {
-      max-width: 860px;
+      width: 100%;
+      max-width: 520px;
       margin: 0 auto;
-      padding: 12px;
+      padding: 10px;
       display: grid;
-      gap: 12px;
+      gap: 10px;
     }
     .card {
       background: #111827;
       border: 1px solid #334155;
       border-radius: 14px;
-      padding: 12px;
+      padding: 14px;
     }
     .row {
       display: flex;
       gap: 10px;
       flex-wrap: wrap;
     }
-    button, input {
+    button {
       border: 0;
       border-radius: 12px;
-      padding: 12px;
-      font-size: 16px;
+      padding: 14px;
+      font-size: 17px;
     }
     button {
       font-weight: 700;
       cursor: pointer;
       background: #22c55e;
       color: #052e16;
-      flex: 1 1 160px;
+      flex: 1 1 100%;
     }
     button.secondary {
       background: #334155;
@@ -51,7 +52,7 @@
     }
     #reader {
       width: 100%;
-      min-height: 340px;
+      min-height: min(68vh, 500px);
       border-radius: 12px;
       overflow: hidden;
       border: 1px solid #334155;
@@ -75,62 +76,11 @@
       pointer-events: none;
       z-index: 3;
     }
-    .muted { opacity: .8; font-size: 14px; }
-    .simulate-wrap input { flex: 1 1 220px; }
-    .debug-panel {
-      margin-top: 12px;
-      border: 1px solid #475569;
-      border-radius: 12px;
-      background: #0f172a;
-      min-height: 220px;
-      display: flex;
-      flex-direction: column;
-    }
-    .debug-summary {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(120px, 1fr));
-      gap: 8px;
-      padding: 10px;
-      border-bottom: 1px solid #1e293b;
-      font-size: 13px;
-    }
-    .debug-row { display: flex; justify-content: space-between; gap: 8px; }
-    .debug-row strong { text-align: right; word-break: break-word; }
-    .rec-dot {
-      display: inline-block;
-      width: 9px;
-      height: 9px;
-      border-radius: 999px;
-      margin-right: 6px;
-      background: #475569;
-      vertical-align: middle;
-    }
-    .rec-dot--active { background: #ef4444; animation: recPulse 1s infinite; }
-    @keyframes recPulse {
-      0% { transform: scale(1); opacity: 1; }
-      50% { transform: scale(1.28); opacity: .45; }
-      100% { transform: scale(1); opacity: 1; }
-    }
-    .analysis-warning {
-      margin: 0 10px 10px;
-      padding: 10px;
-      border-radius: 10px;
-      background: rgba(239, 68, 68, .15);
-      border: 1px solid rgba(239, 68, 68, .45);
-      font-weight: 700;
-      color: #fca5a5;
-      display: none;
-    }
-    .analysis-warning.show { display: block; }
-    .debug-log {
-      margin: 0;
-      padding: 10px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace;
-      font-size: 12px;
-      line-height: 1.35;
-      max-height: 220px;
-      overflow-y: auto;
-      white-space: pre-wrap;
+    .muted { opacity: .8; font-size: 14px; margin: 6px 0; }
+    @media (min-width: 640px) {
+      button {
+        flex: 1 1 150px;
+      }
     }
   </style>
 </head>
@@ -138,7 +88,9 @@
   <main>
     <section class="card">
       <h1>Escáner de QRs</h1>
-      <p class="muted">Tocá <strong>Iniciar</strong> para abrir la cámara (requisito iOS). Apuntá al QR para ir al claim.</p>
+      <p class="muted">1) Tocá <strong>Iniciar</strong> para abrir la cámara (requisito iOS).</p>
+      <p class="muted">2) Apuntá al QR para avanzar automáticamente.</p>
+      <p class="muted">3) Si no enfoca, usá <strong>Cambiar cámara</strong>.</p>
       <div id="reader">
         <div class="reticle" aria-hidden="true"></div>
       </div>
@@ -149,26 +101,7 @@
         <button id="switchCamBtn" class="secondary">Cambiar cámara</button>
       </div>
 
-      <div class="row simulate-wrap" style="margin-top:10px;">
-        <input id="simulateInput" placeholder="Simular decodedText" />
-        <button id="simulateBtn" class="secondary">Probar</button>
-      </div>
-
       <p id="status" class="muted">Listo para iniciar cámara.</p>
-      <p id="lastRead" class="muted">Último QR: —</p>
-
-      <div class="debug-panel">
-        <div class="debug-summary">
-          <div class="debug-row"><span>Estado</span><strong id="debugState">idle</strong></div>
-          <div class="debug-row"><span><span id="recDot" class="rec-dot"></span>Analizando</span><strong id="debugAnalysis">NO</strong></div>
-          <div class="debug-row"><span>Frames/seg</span><strong id="debugFps">0</strong></div>
-          <div class="debug-row"><span>Fallas/seg</span><strong id="debugFailureRate">0</strong></div>
-          <div class="debug-row" style="grid-column:1/-1;"><span>Cámara</span><strong id="debugCamera">-</strong></div>
-          <div class="debug-row" style="grid-column:1/-1;"><span>Último error</span><strong id="debugLastError">-</strong></div>
-        </div>
-        <div id="analysisWarning" class="analysis-warning">Se ve la cámara pero no se están analizando frames. Probá reiniciar / cambiar cámara.</div>
-        <pre id="debugLog" class="debug-log"></pre>
-      </div>
     </section>
   </main>
 
