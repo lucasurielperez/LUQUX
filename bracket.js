@@ -1,6 +1,7 @@
 (function () {
   const PLAYERS_API = 'api.php?action=public_players_active';
   const STATE_KEY = 'bracket_state_v1';
+  const ADJUST_POINTS_API = './api.php?action=adjust_points';
 
   const bracketRowEl = document.getElementById('bracketRow');
   const bracketScrollEl = document.getElementById('bracketScroll');
@@ -64,6 +65,33 @@
     }
 
     return rounds;
+  }
+
+  function createEmptyThirdPlace() {
+    return {
+      player1_id: null,
+      player2_id: null,
+      winner_id: null,
+    };
+  }
+
+  function ensureStateShape(currentState) {
+    if (!currentState.thirdPlace) {
+      if (currentState.third_place_match) {
+        currentState.thirdPlace = {
+          player1_id: currentState.third_place_match.player1_id || null,
+          player2_id: currentState.third_place_match.player2_id || null,
+          winner_id: currentState.third_place_match.winner_id || null,
+        };
+      } else {
+        currentState.thirdPlace = createEmptyThirdPlace();
+      }
+    }
+    if (!('applied_at' in currentState)) {
+      currentState.applied_at = currentState.bracket_applied_at || null;
+    }
+    currentState.third_place_match = undefined;
+    currentState.bracket_applied_at = undefined;
   }
 
   function buildTournamentState(playersRows) {
@@ -139,23 +167,94 @@
     }
 
     const bracket = {
-      version: 1,
+      version: 2,
       generated_at: new Date().toISOString(),
       players,
       players_by_id: playerMap,
       duplicated_player_id: duplicatedPlayerId,
       duplicated_by_round: duplicatedByRound,
       rounds,
-      third_place_match: null,
+      thirdPlace: createEmptyThirdPlace(),
       awards: [],
-      bracket_applied_at: null,
+      applied_at: null,
     };
 
     syncRounds(bracket);
     return bracket;
   }
 
+  function getPlayerFromState(currentState, id) {
+    if (!id || !currentState || !currentState.players_by_id[id]) return null;
+    return currentState.players_by_id[id];
+  }
+
+  function getDeterministicPlayerSortValue(currentState, playerId) {
+    const player = getPlayerFromState(currentState, playerId);
+    return {
+      total_points: player ? Number(player.total_points || 0) : 0,
+      display_name: player ? String(player.display_name || 'Jugador') : 'Jugador',
+    };
+  }
+
+  function buildThirdPlaceMatch(currentState) {
+    ensureStateShape(currentState);
+
+    const semiRoundIndex = currentState.rounds.length - 2;
+    if (semiRoundIndex < 0) {
+      currentState.thirdPlace = createEmptyThirdPlace();
+      return;
+    }
+
+    const semis = Array.isArray(currentState.rounds[semiRoundIndex]) ? currentState.rounds[semiRoundIndex] : [];
+    const losers = semis.map(function (m) {
+      if (!m || !m.player1_id || !m.player2_id || !m.winner_id) return null;
+      if (m.winner_id !== m.player1_id && m.winner_id !== m.player2_id) return null;
+      return m.winner_id === m.player1_id ? m.player2_id : m.player1_id;
+    }).filter(Boolean);
+
+    const uniqueLosers = [];
+    losers.forEach(function (id) {
+      if (!uniqueLosers.includes(id)) uniqueLosers.push(id);
+    });
+
+    uniqueLosers.sort(function (a, b) {
+      const pa = getDeterministicPlayerSortValue(currentState, a);
+      const pb = getDeterministicPlayerSortValue(currentState, b);
+      if (pb.total_points !== pa.total_points) return pb.total_points - pa.total_points;
+      return pa.display_name.localeCompare(pb.display_name, 'es');
+    });
+
+    const prev = currentState.thirdPlace || createEmptyThirdPlace();
+    if (uniqueLosers.length < 2) {
+      currentState.thirdPlace = createEmptyThirdPlace();
+      return;
+    }
+
+    const nextP1 = uniqueLosers[0];
+    const nextP2 = uniqueLosers[1];
+    let nextWinner = prev.winner_id;
+
+    if (nextP1 === nextP2) {
+      currentState.thirdPlace = createEmptyThirdPlace();
+      return;
+    }
+
+    if (prev.player1_id !== nextP1 || prev.player2_id !== nextP2) {
+      nextWinner = null;
+    }
+    if (nextWinner !== nextP1 && nextWinner !== nextP2) {
+      nextWinner = null;
+    }
+
+    currentState.thirdPlace = {
+      player1_id: nextP1,
+      player2_id: nextP2,
+      winner_id: nextWinner,
+    };
+  }
+
   function syncRounds(currentState) {
+    ensureStateShape(currentState);
     currentState.duplicated_by_round = currentState.duplicated_by_round || {};
     Object.keys(currentState.duplicated_by_round).forEach(function (roundKey) {
       if (Number(roundKey) > 0) {
@@ -197,6 +296,9 @@
       }
 
       currentState.rounds[r].forEach(function (match) {
+        if (match.player1_id === match.player2_id) {
+          match.player2_id = null;
+        }
         if (match.winner_id !== match.player1_id && match.winner_id !== match.player2_id) {
           match.winner_id = null;
         }
@@ -207,51 +309,14 @@
     currentState.awards = computeAwards(currentState);
   }
 
-  function getPlayerFromState(currentState, id) {
-    if (!id || !currentState || !currentState.players_by_id[id]) return null;
-    return currentState.players_by_id[id];
-  }
-
-  function buildThirdPlaceMatch(currentState) {
-    const semiRoundIndex = currentState.rounds.length - 2;
-    if (semiRoundIndex < 0) {
-      currentState.third_place_match = null;
-      return;
-    }
-
-    const semis = currentState.rounds[semiRoundIndex];
-    if (!Array.isArray(semis) || semis.length < 2) {
-      currentState.third_place_match = null;
-      return;
-    }
-
-    const losers = semis.slice(0, 2).map(function (m) {
-      if (!m.winner_id || !m.player1_id || !m.player2_id) return null;
-      return m.winner_id === m.player1_id ? m.player2_id : m.player1_id;
-    });
-
-    if (losers.some(function (v) { return !v; })) {
-      currentState.third_place_match = {
-        id: 'third_place',
-        player1_id: losers[0] || null,
-        player2_id: losers[1] || null,
-        winner_id: null,
-      };
-      return;
-    }
-
-    const prevWinner = currentState.third_place_match ? currentState.third_place_match.winner_id : null;
-    currentState.third_place_match = {
-      id: 'third_place',
-      player1_id: losers[0],
-      player2_id: losers[1],
-      winner_id: (prevWinner === losers[0] || prevWinner === losers[1]) ? prevWinner : null,
-    };
-  }
-
   function getPlayer(id) {
     if (!id || !state || !state.players_by_id[id]) return null;
     return state.players_by_id[id];
+  }
+
+  function formatPlayerName(id, fallback) {
+    const p = getPlayer(id);
+    return p ? escapeHtml(p.display_name) : (fallback || '—');
   }
 
   function matchCard(match, opts) {
@@ -269,9 +334,9 @@
 
     return `
       <div class="match ${opts.compact ? 'compact' : ''}" style="margin-top:${opts.marginTopPx}px;">
-        <div class="p">${p1 ? escapeHtml(p1.display_name) : '—'} ${duplicateBadgeP1}</div>
+        <div class="p" title="${p1 ? escapeHtml(p1.display_name) : 'Sin definir'}">${p1 ? escapeHtml(p1.display_name) : '—'} ${duplicateBadgeP1}</div>
         <div class="vs">vs</div>
-        <div class="p">${p2 ? escapeHtml(p2.display_name) : '—'} ${duplicateBadgeP2}</div>
+        <div class="p" title="${p2 ? escapeHtml(p2.display_name) : 'Sin definir'}">${p2 ? escapeHtml(p2.display_name) : '—'} ${duplicateBadgeP2}</div>
         <select class="winner-select" data-round="${match.round_index}" data-match="${match.match_index}" ${(!canPick || editDisabled) ? 'disabled' : ''}>
           <option value="">Ganador…</option>
           ${p1 ? `<option value="${p1.player_id}" ${match.winner_id === p1.player_id ? 'selected' : ''}>${escapeHtml(p1.display_name)}</option>` : ''}
@@ -282,20 +347,31 @@
   }
 
   function getFinalMatch(currentState) {
-    if (!currentState.rounds.length) return null;
-    const finalRound = currentState.rounds[currentState.rounds.length - 1];
-    return finalRound && finalRound[0] ? finalRound[0] : null;
+    const lastRound = currentState.rounds[currentState.rounds.length - 1];
+    return lastRound && lastRound[0] ? lastRound[0] : null;
+  }
+
+  function getFinalWinnerId(currentState) {
+    const fm = getFinalMatch(currentState);
+    return fm ? fm.winner_id : null;
   }
 
   function isTournamentClosed(currentState) {
+    return !!getFinalWinnerId(currentState) && !!currentState.thirdPlace?.winner_id;
+  }
+
+  function getPodiumData(currentState) {
     const finalMatch = getFinalMatch(currentState);
-    if (!finalMatch || !finalMatch.winner_id) return false;
+    if (!finalMatch || !finalMatch.winner_id) return null;
 
-    if (!currentState.third_place_match) {
-      return false;
-    }
-
-    return Boolean(currentState.third_place_match.winner_id);
+    const championId = finalMatch.winner_id;
+    const runnerupId = championId === finalMatch.player1_id ? finalMatch.player2_id : finalMatch.player1_id;
+    const thirdId = currentState.thirdPlace ? currentState.thirdPlace.winner_id : null;
+    return {
+      championId,
+      runnerupId,
+      thirdId,
+    };
   }
 
   function computeFinalRanking(currentState) {
@@ -320,7 +396,7 @@
     const championId = finalMatch.winner_id;
     const runnerUpId = finalMatch.winner_id === finalMatch.player1_id ? finalMatch.player2_id : finalMatch.player1_id;
 
-    const tp = currentState.third_place_match;
+    const tp = currentState.thirdPlace;
     const thirdId = tp.winner_id;
     const fourthId = tp.winner_id === tp.player1_id ? tp.player2_id : tp.player1_id;
 
@@ -394,6 +470,8 @@
         points_delta: pointsDeltaByPosition(row.position),
         note: `Torneo bracket: puesto #${row.position}`,
       };
+    }).filter(function (award) {
+      return award.points_delta > 0;
     });
   }
 
@@ -438,16 +516,59 @@
     rankingPreviewEl.textContent = `Ranking final: ${top4}`;
   }
 
+  function renderThirdPlaceCard() {
+    const third = state.thirdPlace || createEmptyThirdPlace();
+    const p1 = getPlayer(third.player1_id);
+    const p2 = getPlayer(third.player2_id);
+    const canPick = Boolean(p1 && p2 && p1.player_id !== p2.player_id);
+
+    return `
+      <div class="special-card">
+        <h4>3ER PUESTO</h4>
+        <div class="match compact special-match" style="margin-top:0;">
+          <div class="p" title="${p1 ? escapeHtml(p1.display_name) : 'Pendiente de semis'}">${p1 ? escapeHtml(p1.display_name) : '—'}</div>
+          <div class="vs">vs</div>
+          <div class="p" title="${p2 ? escapeHtml(p2.display_name) : 'Pendiente de semis'}">${p2 ? escapeHtml(p2.display_name) : '—'}</div>
+          <select id="thirdWinner" class="winner-select" ${canPick ? '' : 'disabled'}>
+            <option value="">Ganador 3er puesto…</option>
+            ${p1 ? `<option value="${p1.player_id}" ${third.winner_id === p1.player_id ? 'selected' : ''}>${escapeHtml(p1.display_name)}</option>` : ''}
+            ${p2 ? `<option value="${p2.player_id}" ${third.winner_id === p2.player_id ? 'selected' : ''}>${escapeHtml(p2.display_name)}</option>` : ''}
+          </select>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderPodium() {
+    const data = getPodiumData(state);
+    if (!data) {
+      return '';
+    }
+
+    const firstName = formatPlayerName(data.championId);
+    const secondName = formatPlayerName(data.runnerupId, 'Pendiente');
+    const thirdName = data.thirdId ? formatPlayerName(data.thirdId) : 'pendiente…';
+
+    return `
+      <div class="podium-wrap">
+        <div class="podium-card p2" title="${escapeHtml(secondName)}"><span>2°</span><strong>${secondName}</strong><em>+300</em></div>
+        <div class="podium-card p1" title="${escapeHtml(firstName)}"><span>1°</span><strong>${firstName}</strong><em>+500</em></div>
+        <div class="podium-card p3" title="${escapeHtml(String(thirdName))}"><span>3°</span><strong>${thirdName}</strong><em>+100</em></div>
+      </div>
+    `;
+  }
+
   function updateApplyButton() {
     if (!isTournamentClosed(state)) {
       applyBtn.hidden = true;
+      applyBtn.disabled = true;
       return;
     }
 
     applyBtn.hidden = false;
-    if (state.bracket_applied_at) {
+    if (state.applied_at) {
       applyBtn.disabled = true;
-      applyBtn.textContent = 'Puntos ya aplicados';
+      applyBtn.textContent = 'Ya aplicado';
       return;
     }
 
@@ -461,7 +582,8 @@
     const maxMatches = state.rounds.length ? state.rounds[0].length : 1;
 
     bracketRowEl.innerHTML = state.rounds.map(function (round, roundIndex) {
-      const title = `Round ${roundIndex + 1}`;
+      const isFinalColumn = roundIndex === state.rounds.length - 1;
+      const title = isFinalColumn ? 'FINAL' : `Round ${roundIndex + 1}`;
       const roundSpacing = Math.min(48, baseGap * Math.pow(2, Math.min(roundIndex, 3)));
       const offsetUnits = Math.max(0, (maxMatches - round.length) / 2);
       const topOffsetPx = Math.floor(offsetUnits * (baseMatchHeight + baseGap));
@@ -475,9 +597,10 @@
         });
       }).join('');
 
-      const isFinalColumn = roundIndex === state.rounds.length - 1;
-      const trophyMarkup = isFinalColumn
-        ? `<div class="final-trophy"><img class="trophy" alt="Trofeo" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' x2='1' y1='0' y2='1'%3E%3Cstop offset='0' stop-color='%23ffe08c'/%3E%3Cstop offset='1' stop-color='%23d6931c'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath fill='url(%23g)' d='M78 26h100v26c0 27-12 48-33 63v27h34v26H77v-26h34v-27C90 100 78 79 78 52V26Zm-37 18h29v20c0 21-11 40-29 49V86c9-6 14-14 14-22V44Zm144 0h30v20c0 8 5 16 14 22v27c-18-9-30-28-30-49V44ZM74 188h108v42H74v-42Z'/%3E%3C/svg%3E" /></div>`
+      const finalExtrasMarkup = isFinalColumn
+        ? `${renderThirdPlaceCard()}
+           <div class="final-trophy"><img class="trophy" alt="Trofeo" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' x2='1' y1='0' y2='1'%3E%3Cstop offset='0' stop-color='%23ffe08c'/%3E%3Cstop offset='1' stop-color='%23d6931c'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath fill='url(%23g)' d='M78 26h100v26c0 27-12 48-33 63v27h34v26H77v-26h34v-27C90 100 78 79 78 52V26Zm-37 18h29v20c0 21-11 40-29 49V86c9-6 14-14 14-22V44Zm144 0h30v20c0 8 5 16 14 22v27c-18-9-30-28-30-49V44ZM74 188h108v42H74v-42Z'/%3E%3C/svg%3E" /></div>
+           ${renderPodium()}`
         : '';
 
       return `
@@ -486,23 +609,23 @@
           <div class="matches">
             ${matchMarkup}
           </div>
-          ${trophyMarkup}
+          ${finalExtrasMarkup}
         </section>
       `;
     }).join('');
 
-    if (state.third_place_match) {
-      const p1 = getPlayer(state.third_place_match.player1_id);
-      const p2 = getPlayer(state.third_place_match.player2_id);
-      statusMsgEl.innerHTML = `
-        3er puesto: ${p1 ? escapeHtml(p1.display_name) : '—'} vs ${p2 ? escapeHtml(p2.display_name) : '—'}
-        <select id="thirdWinner" class="winner-select" ${(p1 && p2) ? '' : 'disabled'}>
-          <option value="">Ganador 3er puesto…</option>
-          ${p1 ? `<option value="${p1.player_id}" ${state.third_place_match.winner_id === p1.player_id ? 'selected' : ''}>${escapeHtml(p1.display_name)}</option>` : ''}
-          ${p2 ? `<option value="${p2.player_id}" ${state.third_place_match.winner_id === p2.player_id ? 'selected' : ''}>${escapeHtml(p2.display_name)}</option>` : ''}
-        </select>`;
+    if (!isTournamentClosed(state)) {
+      if (!getFinalWinnerId(state)) {
+        statusMsgEl.textContent = 'Definí ganador de la final para cerrar el torneo.';
+      } else if (!state.thirdPlace.winner_id) {
+        statusMsgEl.textContent = 'Falta definir 3er puesto para repartir puntos.';
+      }
     } else {
-      statusMsgEl.textContent = 'Definí ganadores para avanzar en la llave.';
+      statusMsgEl.textContent = 'Torneo cerrado. Listo para aplicar puntos reales.';
+    }
+
+    if (state.applied_at) {
+      errorMsgEl.textContent = `Puntos ya aplicados el ${new Date(state.applied_at).toLocaleString('es-AR')}.`;
     }
 
     renderRankingPreview();
@@ -519,10 +642,19 @@
     const finalMatch = getFinalMatch(state);
     const prevChampion = finalMatch ? finalMatch.winner_id : null;
 
+    if (winnerId && winnerId !== match.player1_id && winnerId !== match.player2_id) {
+      errorMsgEl.textContent = 'Ganador inválido: no pertenece al match.';
+      return;
+    }
+
     match.winner_id = winnerId || null;
     syncRounds(state);
     saveState();
     renderBracket();
+
+    if (state.applied_at) {
+      errorMsgEl.textContent = 'Ojo: ya aplicaste puntos, cambiar resultados no revierte puntos.';
+    }
 
     const currentFinal = getFinalMatch(state);
     if (currentFinal && currentFinal.winner_id && currentFinal.winner_id !== prevChampion) {
@@ -534,51 +666,93 @@
   }
 
   async function applyAwardsToBackend() {
-    if (!isTournamentClosed(state)) return;
+    if (!isTournamentClosed(state)) {
+      errorMsgEl.textContent = 'El torneo no está cerrado: faltan resultados para aplicar puntos.';
+      return;
+    }
     const token = localStorage.getItem('admin_token') || '';
     if (!token) {
       errorMsgEl.textContent = 'Falta admin_token (abrí admin.html y guardalo)';
       return;
     }
-    if (state.bracket_applied_at) return;
+    if (state.applied_at) {
+      errorMsgEl.textContent = 'Ya aplicaste puntos en este torneo.';
+      return;
+    }
 
-    const awards = state.awards.slice();
-    const promises = awards.map(function (award) {
-      return fetch('admin/api.php?action=adjust_points', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          player_id: award.player_id,
-          points_delta: award.points_delta,
-          note: award.note,
-        }),
-      }).then(async function (res) {
-        const data = await res.json().catch(function () { return {}; });
-        if (!res.ok || !data.ok) {
-          throw new Error(data.error || `HTTP ${res.status}`);
-        }
-        return data;
-      });
+    if (!window.confirm('Esto suma puntos reales al ranking. ¿Aplicar?')) {
+      return;
+    }
+
+    const awards = state.awards.slice().filter(function (award) {
+      return award.points_delta > 0;
     });
 
-    const settled = await Promise.allSettled(promises);
-    const errors = settled.filter(function (x) { return x.status === 'rejected'; });
-    const okCount = settled.length - errors.length;
-    const previewErrors = errors.slice(0, 5).map(function (e, idx) {
-      const reason = e.reason && e.reason.message ? e.reason.message : 'Error desconocido';
-      return `${idx + 1}) ${reason}`;
+    if (!awards.length) {
+      errorMsgEl.textContent = 'No hay premios positivos para aplicar.';
+      return;
+    }
+
+    applyBtn.disabled = true;
+    errorMsgEl.textContent = '';
+
+    const errors = [];
+    let okCount = 0;
+
+    for (let i = 0; i < awards.length; i += 1) {
+      const award = awards[i];
+      statusMsgEl.textContent = `Aplicando puntos… ${i + 1}/${awards.length}`;
+      try {
+        const res = await fetch(ADJUST_POINTS_API, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            player_id: award.player_id,
+            points_delta: award.points_delta,
+            note: award.note,
+          }),
+        });
+        const data = await res.json().catch(function () { return {}; });
+        if (!res.ok || !data.ok) {
+          const err = {
+            error: data.error || `HTTP ${res.status}`,
+            request_id: data.request_id || 'n/a',
+            award,
+          };
+          errors.push(err);
+          console.error('Error adjust_points', err);
+        } else {
+          okCount += 1;
+        }
+      } catch (err) {
+        const wrapped = {
+          error: err && err.message ? err.message : 'Error de red',
+          request_id: 'n/a',
+          award,
+        };
+        errors.push(wrapped);
+        console.error('Error fetch adjust_points', wrapped);
+      }
+    }
+
+    const errorPreview = errors.slice(0, 5).map(function (entry, idx) {
+      return `${idx + 1}) ${entry.error} (request_id: ${entry.request_id})`;
     }).join(' | ');
 
-    errorMsgEl.textContent = `Aplicación completada. OK: ${okCount} · ERROR: ${errors.length}${previewErrors ? ` · ${previewErrors}` : ''}`;
+    errorMsgEl.textContent = `Aplicación completada. OK: ${okCount} / ERROR: ${errors.length}${errorPreview ? ` · ${errorPreview}` : ''}`;
 
     if (errors.length === 0) {
-      state.bracket_applied_at = new Date().toISOString();
+      state.applied_at = new Date().toISOString();
       saveState();
       updateApplyButton();
       showCelebration('💰 Puntos aplicados', '¡Éxito!', 2000, 40);
+      statusMsgEl.textContent = 'Puntos reales aplicados correctamente.';
+    } else {
+      updateApplyButton();
+      statusMsgEl.textContent = 'Aplicación con errores. Revisá detalles.';
     }
   }
 
@@ -588,11 +762,23 @@
       if (!(t instanceof HTMLSelectElement)) return;
 
       if (t.id === 'thirdWinner') {
-        if (!state.third_place_match) return;
-        state.third_place_match.winner_id = t.value ? Number(t.value) : null;
+        const third = state.thirdPlace || createEmptyThirdPlace();
+        const selectedWinner = t.value ? Number(t.value) : null;
+
+        if (selectedWinner && selectedWinner !== third.player1_id && selectedWinner !== third.player2_id) {
+          errorMsgEl.textContent = 'Ganador inválido para 3er puesto.';
+          t.value = '';
+          return;
+        }
+
+        state.thirdPlace.winner_id = selectedWinner;
         state.awards = computeAwards(state);
         saveState();
         renderBracket();
+
+        if (state.applied_at) {
+          errorMsgEl.textContent = 'Ojo: ya aplicaste puntos, cambiar resultados no revierte puntos.';
+        }
         return;
       }
 
@@ -628,6 +814,7 @@
       if (!raw) return null;
       const parsed = JSON.parse(raw);
       if (!parsed || !Array.isArray(parsed.rounds) || !parsed.players_by_id) return null;
+      ensureStateShape(parsed);
       return parsed;
     } catch (_) {
       return null;

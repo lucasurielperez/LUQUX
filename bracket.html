@@ -187,6 +187,62 @@
       margin: 1rem auto .2rem;
       text-align: center;
     }
+
+    .special-card {
+      margin-top: .7rem;
+      border: 1px solid rgba(255, 189, 87, .45);
+      border-radius: 12px;
+      background: rgba(34, 20, 60, .45);
+      padding: .45rem;
+    }
+    .special-card h4 {
+      margin: 0 0 .35rem;
+      text-align: center;
+      color: #ffd88a;
+      font-size: clamp(12px, 1.6vh, 16px);
+      letter-spacing: .05em;
+    }
+    .special-match { border-color: rgba(255, 193, 102, .55); }
+
+    .podium-wrap {
+      margin-top: .7rem;
+      display: grid;
+      grid-template-columns: 1fr 1.15fr 1fr;
+      align-items: end;
+      gap: .35rem;
+    }
+    .podium-card {
+      border-radius: 10px;
+      padding: .35rem;
+      display: grid;
+      gap: .12rem;
+      text-align: center;
+      overflow: hidden;
+      border: 1px solid rgba(197, 217, 255, .45);
+      background: rgba(15, 34, 74, .72);
+    }
+    .podium-card span { font-weight: 800; font-size: clamp(11px, 1.25vh, 13px); }
+    .podium-card strong {
+      font-size: clamp(10px, 1.25vh, 14px);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      display: block;
+    }
+    .podium-card em { font-style: normal; font-weight: 800; color: #d5e5ff; }
+    .podium-card.p1 {
+      min-height: 88px;
+      background: linear-gradient(180deg, rgba(59, 104, 53, .95), rgba(106, 78, 18, .9));
+      box-shadow: 0 0 16px rgba(255, 213, 106, .45);
+    }
+    .podium-card.p2 {
+      min-height: 76px;
+      background: linear-gradient(180deg, rgba(115, 130, 155, .92), rgba(101, 66, 31, .82));
+    }
+    .podium-card.p3 {
+      min-height: 64px;
+      background: linear-gradient(180deg, rgba(50, 84, 148, .92), rgba(60, 61, 108, .82));
+    }
     .trophy {
       width: clamp(84px, 9vw, 128px);
       filter: drop-shadow(0 0 26px rgba(255, 203, 109, .45));
@@ -201,6 +257,13 @@
       font-size: clamp(12px, 1.8vh, 20px);
       color: #9fd8ff;
       max-width: 95%;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    #errorMsg {
+      max-width: 36%;
+      color: #ffc1c1;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
