@@ -58,44 +58,6 @@
       z-index: 5;
       pointer-events: auto;
     }
-    .top-left-controls,
-    .top-right-controls {
-      position: absolute;
-      top: .5vh;
-      z-index: 6;
-      pointer-events: auto;
-      display: flex;
-      gap: .5rem;
-      align-items: center;
-    }
-    .top-left-controls { left: 1.2vw; }
-    .top-right-controls { right: 1.2vw; }
-    .inline-select {
-      border: 1px solid rgba(151, 181, 255, .55);
-      background: rgba(10, 22, 58, .82);
-      color: #dce8ff;
-      border-radius: 10px;
-      padding: .45rem .6rem;
-      font-weight: 700;
-    }
-    .player-picker {
-      position: relative;
-    }
-    .player-picker-panel {
-      position: absolute;
-      top: calc(100% + .3rem);
-      right: 0;
-      width: min(290px, 42vw);
-      max-height: 34vh;
-      overflow: auto;
-      border: 1px solid rgba(151, 181, 255, .55);
-      background: rgba(10, 22, 58, .96);
-      border-radius: 10px;
-      padding: .45rem;
-      display: none;
-    }
-    .player-picker.open .player-picker-panel { display: block; }
-    .player-option { display: flex; align-items: center; gap: .4rem; font-size: clamp(11px, 1.3vh, 14px); margin: .2rem 0; }
     .tournament-input {
       width: min(48vw, 420px);
       border: 1px solid rgba(151, 181, 255, .55);
@@ -364,23 +326,6 @@
 </head>
 <body>
   <div class="screen">
-    <div class="top-left-controls">
-      <label for="playersPerMatchSelect" class="status">Jugadores por partida</label>
-      <select id="playersPerMatchSelect" class="inline-select" aria-label="Jugadores por partida">
-        <option value="2">2</option>
-        <option value="3">3</option>
-        <option value="4">4</option>
-        <option value="5">5</option>
-        <option value="6">6</option>
-      </select>
-    </div>
-    <div class="top-right-controls">
-      <div class="player-picker" id="playerPicker">
-        <button id="playersToggleBtn" class="btn" type="button">Jugadores (todos)</button>
-        <div id="playersPanel" class="player-picker-panel" role="group" aria-label="Jugadores participantes"></div>
-      </div>
-      <button id="reshuffleBtn" class="btn" type="button">Reshuffle</button>
-    </div>
     <div class="tournament-input-wrap">
       <input id="tournamentNameInput" class="tournament-input" type="text" maxlength="60" placeholder="Nombre del torneo" aria-label="Nombre del torneo" />
     </div>
