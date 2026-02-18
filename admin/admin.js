@@ -88,6 +88,58 @@ async function toggleQr(id, is_active) {
   await loadQrList();
 }
 
+function buildClaimQrUrl(code) {
+  const claimUrl = new URL('../qr.html', window.location.href);
+  claimUrl.searchParams.set('code', code || '');
+  return claimUrl.toString();
+}
+
+function triggerDownloadFromDataUrl(dataUrl, filename) {
+  const link = document.createElement('a');
+  link.href = dataUrl;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+
+async function generateQrImage(code) {
+  if (!code) throw new Error('Código QR inválido');
+
+  const container = document.createElement('div');
+  container.style.position = 'fixed';
+  container.style.left = '-9999px';
+  container.style.top = '-9999px';
+  document.body.appendChild(container);
+
+  try {
+    // eslint-disable-next-line no-new
+    new QRCode(container, {
+      text: buildClaimQrUrl(code),
+      width: 512,
+      height: 512,
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    const canvas = container.querySelector('canvas');
+    if (canvas) {
+      triggerDownloadFromDataUrl(canvas.toDataURL('image/png'), `qr-${code}.png`);
+      return;
+    }
+
+    const img = container.querySelector('img');
+    if (img?.src) {
+      triggerDownloadFromDataUrl(img.src, `qr-${code}.png`);
+      return;
+    }
+
+    throw new Error('No se pudo generar la imagen del QR');
+  } finally {
+    document.body.removeChild(container);
+  }
+}
+
 async function loadQrList() {
   const { rows } = await call('admin_qr_list');
   const items = rowsOrEmpty(rows);
@@ -100,11 +152,18 @@ async function loadQrList() {
       <td>${r.qr_type === 'game' ? esc(r.game_code || '') : Number(r.points_delta || 0)}</td>
       <td>${Number(r.is_active) === 1 ? '🟢' : '🔴'}</td>
       <td><button data-qid="${r.id}" data-next="${Number(r.is_active) === 1 ? 0 : 1}">${Number(r.is_active) === 1 ? 'Desactivar' : 'Activar'}</button></td>
+      <td><button data-generate-qr="${esc(r.code || '')}">Generar</button></td>
     </tr>
   `).join('');
 
   tb.querySelectorAll('button[data-qid]').forEach((btn) => {
     btn.onclick = () => toggleQr(Number(btn.dataset.qid), Number(btn.dataset.next) === 1).catch((e) => alert(e.message));
+  });
+
+  tb.querySelectorAll('button[data-generate-qr]').forEach((btn) => {
+    btn.onclick = () => generateQrImage(btn.dataset.generateQr || '').catch((e) => {
+      el('qrMsg').textContent = `Error: ${e.message}`;
+    });
   });
 }
 
