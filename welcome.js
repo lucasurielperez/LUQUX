@@ -126,7 +126,7 @@
 
   function goToGame() {
     if (!player) return;
-    location.href = 'admin/virus.html';
+    location.href = 'admin/qr_scanner.html';
   }
 
   async function bootstrap() {

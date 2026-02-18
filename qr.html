@@ -25,17 +25,18 @@
       const resultEl = document.getElementById('result');
       const actionsEl = document.getElementById('actions');
       const code = new URLSearchParams(location.search).get('code') || '';
+      const QR_SCANNER_PATH = 'admin/qr_scanner.html';
 
       function showButton(label, href) {
         actionsEl.innerHTML = '';
         const a = document.createElement('a');
         a.textContent = label;
-        a.href = href || 'index.html';
+        a.href = href || QR_SCANNER_PATH;
         actionsEl.appendChild(a);
       }
 
       function resolveRedirect(ru) {
-        if (!ru) return 'index.html';
+        if (!ru) return QR_SCANNER_PATH;
 
         // Si viene sin protocolo tipo "pcn.com.ar/123/..."
         if (ru.startsWith('pcn.com.ar/')) {
@@ -59,7 +60,7 @@
       if (!code) {
         resultEl.textContent = 'QR inválido';
         resultEl.className = 'bad';
-        showButton('Volver', 'index.html');
+        showButton('Volver', QR_SCANNER_PATH);
         return;
       }
 
@@ -101,7 +102,7 @@
             resultEl.textContent = 'No se pudo canjear el QR';
           }
           resultEl.className = 'bad';
-          showButton('Volver', 'index.html');
+          showButton('Volver', QR_SCANNER_PATH);
           return;
         }
 
@@ -113,12 +114,12 @@
             </div>
             <div>QR secreto canjeado</div>
           `;
-          showButton('Seguir', 'index.html');
+          showButton('Seguir', QR_SCANNER_PATH);
           return;
         }
 
         if (data.qr_type === 'game') {
-          const finalUrl = resolveRedirect(data.redirect_url || 'admin/virus.html');
+          const finalUrl = resolveRedirect(data.redirect_url || QR_SCANNER_PATH);
 
           resultEl.innerHTML = `
             <h3>Juego desbloqueado</h3>
@@ -136,12 +137,12 @@
 
         resultEl.textContent = 'Respuesta desconocida';
         resultEl.className = 'bad';
-        showButton('Volver', 'index.html');
+        showButton('Volver', QR_SCANNER_PATH);
 
       } catch (err) {
         resultEl.textContent = 'Error de red';
         resultEl.className = 'bad';
-        showButton('Volver', 'index.html');
+        showButton('Volver', QR_SCANNER_PATH);
       }
     })();
   </script>
