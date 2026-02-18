@@ -336,13 +336,13 @@
       const oddPlayerId = oddMatch.player1_id || oddMatch.player2_id;
       const pick = picks[roundIndex] || {};
       const prevLuckyId = pick.lucky_loser_id ? Number(pick.lucky_loser_id) : null;
-      const mode = pick.mode === 'manual' ? 'manual' : 'auto';
+      const mode = pick.mode === 'auto' ? 'auto' : 'manual';
       const candidates = getLuckyCandidates(currentState, roundIndex, oddPlayerId);
 
       let luckyId = null;
       if (mode === 'manual' && prevLuckyId && candidates.includes(prevLuckyId) && prevLuckyId !== oddPlayerId) {
         luckyId = prevLuckyId;
-      } else if (candidates.length) {
+      } else if (mode === 'auto' && candidates.length) {
         luckyId = candidates[0];
       }
 
@@ -355,7 +355,7 @@
       nextPicks[roundIndex] = {
         odd_player_id: oddPlayerId,
         lucky_loser_id: luckyId,
-        mode: (mode === 'manual' && luckyId) ? 'manual' : 'auto',
+        mode,
       };
     });
 
@@ -411,7 +411,7 @@
     return {
       roundIndex,
       matchIndex,
-      mode: pick.mode === 'manual' ? 'manual' : 'auto',
+      mode: pick.mode === 'auto' ? 'auto' : 'manual',
       oddPlayerId,
       luckyLoserId,
       candidates,
