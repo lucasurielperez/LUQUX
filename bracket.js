@@ -1,6 +1,7 @@
 (function () {
   const PLAYERS_API = 'api.php?action=public_players_active';
   const STATE_KEY = 'bracket_state_v1';
+  const TOURNAMENT_NAME_KEY = 'bracket_tournament_name_v1';
   const ADJUST_POINTS_API = './api.php?action=adjust_points';
 
   const bracketRowEl = document.getElementById('bracketRow');
@@ -10,6 +11,8 @@
   const rankingPreviewEl = document.getElementById('rankingPreview');
   const rebuildBtn = document.getElementById('rebuildBtn');
   const applyBtn = document.getElementById('applyBtn');
+  const tournamentNameInputEl = document.getElementById('tournamentNameInput');
+  const tournamentTitleEl = document.getElementById('tournamentTitle');
 
   const celebrationEl = document.getElementById('celebration');
   const celebrationTopEl = document.getElementById('celebrationTop');
@@ -18,6 +21,40 @@
 
   let state = null;
   let celebrationTimer = null;
+  let tournamentName = '';
+
+  function normalizeTournamentName(name) {
+    return String(name || '').trim().replace(/\s+/g, ' ');
+  }
+
+  function getTournamentNameForDisplay() {
+    return tournamentName || 'SIN NOMBRE';
+  }
+
+  function getTournamentLabel() {
+    return `TORNEO ${getTournamentNameForDisplay()}`;
+  }
+
+  function loadTournamentName() {
+    try {
+      tournamentName = normalizeTournamentName(localStorage.getItem(TOURNAMENT_NAME_KEY) || '');
+    } catch (_) {
+      tournamentName = '';
+    }
+  }
+
+  function saveTournamentName() {
+    localStorage.setItem(TOURNAMENT_NAME_KEY, tournamentName);
+  }
+
+  function syncTournamentNameUI() {
+    if (tournamentNameInputEl) {
+      tournamentNameInputEl.value = tournamentName;
+    }
+    if (tournamentTitleEl) {
+      tournamentTitleEl.textContent = `🏆 ${getTournamentLabel()}`;
+    }
+  }
 
   function escapeHtml(str) {
     return String(str)
@@ -468,7 +505,7 @@
         player_id: row.player_id,
         position: row.position,
         points_delta: pointsDeltaByPosition(row.position),
-        note: `Torneo bracket: puesto #${row.position}`,
+        note: `${getTournamentLabel()}: puesto #${row.position}`,
       };
     }).filter(function (award) {
       return award.points_delta > 0;
@@ -701,7 +738,7 @@
 
     for (let i = 0; i < awards.length; i += 1) {
       const award = awards[i];
-      statusMsgEl.textContent = `Aplicando puntos… ${i + 1}/${awards.length}`;
+      statusMsgEl.textContent = `${getTournamentLabel()} · Aplicando puntos… ${i + 1}/${awards.length}`;
       try {
         const res = await fetch(ADJUST_POINTS_API, {
           method: 'POST',
@@ -749,10 +786,10 @@
       saveState();
       updateApplyButton();
       showCelebration('💰 Puntos aplicados', '¡Éxito!', 2000, 40);
-      statusMsgEl.textContent = 'Puntos reales aplicados correctamente.';
+      statusMsgEl.textContent = `${getTournamentLabel()} · Puntos reales aplicados correctamente.`;
     } else {
       updateApplyButton();
-      statusMsgEl.textContent = 'Aplicación con errores. Revisá detalles.';
+      statusMsgEl.textContent = `${getTournamentLabel()} · Aplicación con errores. Revisá detalles.`;
     }
   }
 
@@ -797,6 +834,20 @@
     applyBtn.addEventListener('click', function () {
       applyAwardsToBackend();
     });
+
+    if (tournamentNameInputEl) {
+      tournamentNameInputEl.addEventListener('input', function () {
+        tournamentName = normalizeTournamentName(tournamentNameInputEl.value);
+        saveTournamentName();
+        syncTournamentNameUI();
+        if (state) {
+          state.awards = computeAwards(state);
+          saveState();
+          renderRankingPreview();
+          updateApplyButton();
+        }
+      });
+    }
   }
 
   async function fetchActivePlayers() {
@@ -845,6 +896,8 @@
     renderBracket();
   }
 
+  loadTournamentName();
+  syncTournamentNameUI();
   bindEvents();
   initializeTournament(false).catch(function (err) {
     errorMsgEl.textContent = `Error: ${err.message || 'No se pudo cargar la llave.'}`;

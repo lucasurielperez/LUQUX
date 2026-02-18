@@ -50,6 +50,29 @@
       justify-content: space-between;
       gap: .8rem;
     }
+    .tournament-input-wrap {
+      position: absolute;
+      top: .5vh;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 5;
+      pointer-events: auto;
+    }
+    .tournament-input {
+      width: min(48vw, 420px);
+      border: 1px solid rgba(151, 181, 255, .55);
+      background: rgba(10, 22, 58, .82);
+      color: #dce8ff;
+      border-radius: 10px;
+      padding: .45rem .75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+      outline: none;
+    }
+    .tournament-input::placeholder {
+      color: rgba(220, 232, 255, .66);
+    }
     .title {
       margin: 0;
       font-size: clamp(24px, 4.2vh, 52px);
@@ -303,8 +326,11 @@
 </head>
 <body>
   <div class="screen">
+    <div class="tournament-input-wrap">
+      <input id="tournamentNameInput" class="tournament-input" type="text" maxlength="60" placeholder="Nombre del torneo" aria-label="Nombre del torneo" />
+    </div>
     <div class="topbar">
-      <h1 class="title">🏆 Bracket Libertadores</h1>
+      <h1 id="tournamentTitle" class="title">🏆 TORNEO SIN NOMBRE</h1>
       <div class="controls">
         <button id="rebuildBtn" class="btn">Rearmar torneo</button>
         <button id="applyBtn" class="btn" hidden>Aplicar puntos</button>
