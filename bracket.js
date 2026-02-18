@@ -2,8 +2,8 @@
   const PLAYERS_API = 'api.php?action=public_players_active';
   const STATE_KEY = 'bracket_state_v1';
 
-  const leftSideEl = document.getElementById('leftSide');
-  const rightSideEl = document.getElementById('rightSide');
+  const bracketRowEl = document.getElementById('bracketRow');
+  const bracketScrollEl = document.getElementById('bracketScroll');
   const statusMsgEl = document.getElementById('statusMsg');
   const errorMsgEl = document.getElementById('errorMsg');
   const rankingPreviewEl = document.getElementById('rankingPreview');
@@ -45,6 +45,27 @@
     return pairs;
   }
 
+  function pickDuplicateCandidate(candidates, excludedPlayerId) {
+    const validCandidates = candidates.filter(function (p) {
+      return p && p.player_id !== excludedPlayerId;
+    });
+    if (!validCandidates.length) return null;
+    return validCandidates[Math.floor(Math.random() * validCandidates.length)];
+  }
+
+  function generateRoundSizes(playerCount) {
+    const rounds = [];
+    let currentPlayers = playerCount;
+
+    while (currentPlayers > 1) {
+      const matches = Math.ceil(currentPlayers / 2);
+      rounds.push(matches);
+      currentPlayers = matches;
+    }
+
+    return rounds;
+  }
+
   function buildTournamentState(playersRows) {
     const players = shuffle(playersRows.slice()).map(function (p) {
       return {
@@ -75,19 +96,20 @@
         leftPlayers.push(round1Pairs[i][0], round1Pairs[i][1]);
       }
 
-      const validCandidates = leftPlayers.filter(function (p) {
-        return p && p.player_id !== oddPlayer.player_id;
-      });
-      if (!validCandidates.length) {
+      const duplicateCandidate = pickDuplicateCandidate(leftPlayers, oddPlayer.player_id);
+      if (!duplicateCandidate) {
         throw new Error('No se pudo construir llave impar con duplicado válido.');
       }
-
-      const duplicateCandidate = validCandidates[Math.floor(Math.random() * validCandidates.length)];
       duplicatedPlayerId = duplicateCandidate.player_id;
       round1Pairs.push([oddPlayer, duplicateCandidate]);
     }
 
+    const roundSizes = generateRoundSizes(players.length);
     const rounds = [];
+    const duplicatedByRound = {
+      0: duplicatedPlayerId ? [duplicatedPlayerId] : [],
+    };
+
     const round1Matches = round1Pairs.map(function (pair, idx) {
       return {
         id: `r0m${idx}`,
@@ -100,10 +122,8 @@
     });
     rounds.push(round1Matches);
 
-    let prevCount = round1Matches.length;
-    let roundIndex = 1;
-    while (prevCount > 1) {
-      const nextCount = Math.ceil(prevCount / 2);
+    for (let roundIndex = 1; roundIndex < roundSizes.length; roundIndex += 1) {
+      const nextCount = roundSizes[roundIndex];
       const matches = [];
       for (let i = 0; i < nextCount; i += 1) {
         matches.push({
@@ -116,8 +136,6 @@
         });
       }
       rounds.push(matches);
-      prevCount = nextCount;
-      roundIndex += 1;
     }
 
     const bracket = {
@@ -126,6 +144,7 @@
       players,
       players_by_id: playerMap,
       duplicated_player_id: duplicatedPlayerId,
+      duplicated_by_round: duplicatedByRound,
       rounds,
       third_place_match: null,
       awards: [],
@@ -137,6 +156,13 @@
   }
 
   function syncRounds(currentState) {
+    currentState.duplicated_by_round = currentState.duplicated_by_round || {};
+    Object.keys(currentState.duplicated_by_round).forEach(function (roundKey) {
+      if (Number(roundKey) > 0) {
+        currentState.duplicated_by_round[roundKey] = [];
+      }
+    });
+
     for (let r = 1; r < currentState.rounds.length; r += 1) {
       currentState.rounds[r].forEach(function (m) {
         m.player1_id = null;
@@ -154,6 +180,22 @@
         }
       });
 
+      const previousRoundMatches = currentState.rounds[r - 1];
+      if (previousRoundMatches.length % 2 !== 0) {
+        const carryMatch = currentState.rounds[r][currentState.rounds[r].length - 1];
+        if (carryMatch && carryMatch.player1_id && !carryMatch.player2_id) {
+          const previousWinners = previousRoundMatches.map(function (m) {
+            return m.winner_id ? getPlayerFromState(currentState, m.winner_id) : null;
+          }).filter(Boolean);
+
+          const duplicateCandidate = pickDuplicateCandidate(previousWinners, carryMatch.player1_id);
+          if (duplicateCandidate) {
+            carryMatch.player2_id = duplicateCandidate.player_id;
+            currentState.duplicated_by_round[r] = [duplicateCandidate.player_id];
+          }
+        }
+      }
+
       currentState.rounds[r].forEach(function (match) {
         if (match.winner_id !== match.player1_id && match.winner_id !== match.player2_id) {
           match.winner_id = null;
@@ -163,6 +205,11 @@
 
     buildThirdPlaceMatch(currentState);
     currentState.awards = computeAwards(currentState);
+  }
+
+  function getPlayerFromState(currentState, id) {
+    if (!id || !currentState || !currentState.players_by_id[id]) return null;
+    return currentState.players_by_id[id];
   }
 
   function buildThirdPlaceMatch(currentState) {
@@ -212,13 +259,16 @@
     const p2 = getPlayer(match.player2_id);
     const canPick = Boolean(p1 && p2);
 
-    const duplicateBadgeP1 = state.duplicated_player_id === match.player1_id ? '<span class="dup-badge">⚠️ juega 2 veces</span>' : '';
-    const duplicateBadgeP2 = state.duplicated_player_id === match.player2_id ? '<span class="dup-badge">⚠️ juega 2 veces</span>' : '';
+    const duplicatedInRound = state.duplicated_by_round && Array.isArray(state.duplicated_by_round[match.round_index])
+      ? state.duplicated_by_round[match.round_index]
+      : [];
+    const duplicateBadgeP1 = duplicatedInRound.includes(match.player1_id) ? '<span class="dup-badge">⚠ juega 2 veces</span>' : '';
+    const duplicateBadgeP2 = duplicatedInRound.includes(match.player2_id) ? '<span class="dup-badge">⚠ juega 2 veces</span>' : '';
 
     const editDisabled = opts.disableWinnerEdit ? 'disabled' : '';
 
     return `
-      <div class="match">
+      <div class="match ${opts.compact ? 'compact' : ''}" style="margin-top:${opts.marginTopPx}px;">
         <div class="p">${p1 ? escapeHtml(p1.display_name) : '—'} ${duplicateBadgeP1}</div>
         <div class="vs">vs</div>
         <div class="p">${p2 ? escapeHtml(p2.display_name) : '—'} ${duplicateBadgeP2}</div>
@@ -229,21 +279,6 @@
         </select>
       </div>
     `;
-  }
-
-  function renderSide(roundIndexes, container, disableEdit) {
-    container.innerHTML = roundIndexes.map(function (roundIndex) {
-      const round = state.rounds[roundIndex] || [];
-      const title = `Round ${roundIndex + 1}`;
-      return `
-        <section class="round">
-          <h3>${title}</h3>
-          <div class="matches">
-            ${round.map(function (m) { return matchCard(m, { disableWinnerEdit: disableEdit && roundIndex > 0 }); }).join('')}
-          </div>
-        </section>
-      `;
-    }).join('');
   }
 
   function getFinalMatch(currentState) {
@@ -421,20 +456,40 @@
   }
 
   function renderBracket() {
-    const rounds = state.rounds.length;
-    const leftIndexes = [];
-    const rightIndexes = [];
+    const baseMatchHeight = state.players.length > 24 ? 90 : 102;
+    const baseGap = state.players.length > 24 ? 9 : 12;
+    const maxMatches = state.rounds.length ? state.rounds[0].length : 1;
 
-    for (let i = 0; i < rounds; i += 1) {
-      if (i % 2 === 0) {
-        leftIndexes.push(i);
-      } else {
-        rightIndexes.push(i);
-      }
-    }
+    bracketRowEl.innerHTML = state.rounds.map(function (round, roundIndex) {
+      const title = `Round ${roundIndex + 1}`;
+      const roundSpacing = Math.min(48, baseGap * Math.pow(2, Math.min(roundIndex, 3)));
+      const offsetUnits = Math.max(0, (maxMatches - round.length) / 2);
+      const topOffsetPx = Math.floor(offsetUnits * (baseMatchHeight + baseGap));
 
-    renderSide(leftIndexes, leftSideEl, false);
-    renderSide(rightIndexes, rightSideEl, false);
+      const matchMarkup = round.map(function (m, matchIndex) {
+        const marginTopPx = matchIndex === 0 ? topOffsetPx : roundSpacing;
+        return matchCard(m, {
+          disableWinnerEdit: false,
+          compact: state.players.length > 24,
+          marginTopPx,
+        });
+      }).join('');
+
+      const isFinalColumn = roundIndex === state.rounds.length - 1;
+      const trophyMarkup = isFinalColumn
+        ? `<div class="final-trophy"><img class="trophy" alt="Trofeo" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' x2='1' y1='0' y2='1'%3E%3Cstop offset='0' stop-color='%23ffe08c'/%3E%3Cstop offset='1' stop-color='%23d6931c'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath fill='url(%23g)' d='M78 26h100v26c0 27-12 48-33 63v27h34v26H77v-26h34v-27C90 100 78 79 78 52V26Zm-37 18h29v20c0 21-11 40-29 49V86c9-6 14-14 14-22V44Zm144 0h30v20c0 8 5 16 14 22v27c-18-9-30-28-30-49V44ZM74 188h108v42H74v-42Z'/%3E%3C/svg%3E" /></div>`
+        : '';
+
+      return `
+        <section class="round-column" data-round-column="${roundIndex}">
+          <h3>${title}</h3>
+          <div class="matches">
+            ${matchMarkup}
+          </div>
+          ${trophyMarkup}
+        </section>
+      `;
+    }).join('');
 
     if (state.third_place_match) {
       const p1 = getPlayer(state.third_place_match.player1_id);
@@ -452,6 +507,11 @@
 
     renderRankingPreview();
     updateApplyButton();
+
+    const finalMatch = getFinalMatch(state);
+    if (finalMatch && finalMatch.winner_id) {
+      bracketScrollEl.scrollTo({ left: bracketScrollEl.scrollWidth, behavior: 'smooth' });
+    }
   }
 
   function handleWinnerChange(roundIndex, matchIndex, winnerId) {
