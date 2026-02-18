@@ -4,8 +4,6 @@
   const startBtn = document.getElementById('startBtn');
   const stopBtn = document.getElementById('stopBtn');
   const switchCamBtn = document.getElementById('switchCamBtn');
-  const resultBoxEl = document.getElementById('resultBox');
-  const resumeBtn = document.getElementById('resumeBtn');
 
   let scanner = null;
   let state = 'idle';
@@ -19,18 +17,6 @@
 
   function setStatus(message) {
     statusEl.textContent = message;
-  }
-
-  function clearResult() {
-    if (!resultBoxEl) return;
-    resultBoxEl.className = 'muted';
-    resultBoxEl.textContent = '';
-  }
-
-  function showResult(html, className) {
-    if (!resultBoxEl) return;
-    resultBoxEl.className = className || 'muted';
-    resultBoxEl.innerHTML = html;
   }
 
   function inferBasePath() {
@@ -80,7 +66,7 @@
 
     if (!selectedCamera) {
       const preferred = cameras.findIndex((cam) => /back|rear|environment/i.test(String(cam.label || '')));
-      selectedCameraIndex = preferred >= 0 ? preferred : (cameras.length - 1);
+      selectedCameraIndex = preferred >= 0 ? preferred : 0;
       selectedCamera = cameras[selectedCameraIndex];
       return;
     }
@@ -128,121 +114,6 @@
     window.location.href = finalClaimUrl;
   }
 
-
-  function isLikelyValidClaimResponse(data) {
-    if (!data || typeof data !== 'object') return false;
-    if (typeof data.ok !== 'boolean') return false;
-    if (data.ok) return typeof data.qr_type === 'string';
-    return typeof data.code === 'string' || typeof data.error === 'string';
-  }
-
-  function renderClaimResult(data) {
-    if (!data || typeof data !== 'object') {
-      showResult('Respuesta inválida del servidor.', 'bad');
-      return;
-    }
-
-    if (data.ok && data.qr_type === 'secret') {
-      const pts = Number(data.applied_points || 0);
-      showResult(`
-        <div style="font-size:56px;font-weight:800;line-height:1.1;color:${pts >= 0 ? '#22c55e' : '#ef4444'};">${pts > 0 ? '+' : ''}${pts}</div>
-        <div style="font-weight:700;color:#22c55e;">OK</div>
-        <div>QR secreto canjeado</div>
-      `, 'muted');
-      return;
-    }
-
-    if (data.ok) {
-      showResult('QR procesado correctamente.', 'muted');
-      return;
-    }
-
-    if (data.code === 'ALREADY_CLAIMED') {
-      showResult('Ya canjeaste este QR.', 'bad');
-      return;
-    }
-
-    showResult(data.error || 'No se pudo canjear el QR.', 'bad');
-  }
-
-  async function claimInline(code) {
-    if (busy) return;
-    busy = true;
-    let shouldFallback = false;
-
-    try {
-      clearResult();
-      if (resumeBtn) resumeBtn.style.display = 'none';
-      setStatus('Procesando…');
-
-      if (scanner && scanner.isScanning) {
-        scanner.pause(true);
-      }
-
-      async function claim(payload) {
-        const res = await fetch('api.php?action=qr_claim', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-        const data = await res.json().catch(() => null);
-        return { res, data };
-      }
-
-      let { res, data } = await claim({ code });
-
-      if (!data) {
-        shouldFallback = true;
-        return;
-      }
-
-      if ((!res.ok || !data.ok) && data.code === 'PLAYER_REQUIRED') {
-        const playerContext = window.PlayerContext;
-        if (!playerContext || typeof playerContext.ensureActivePlayerForThisDevice !== 'function') {
-          shouldFallback = true;
-          return;
-        }
-
-        const player = await playerContext.ensureActivePlayerForThisDevice();
-        if (!player || !player.id || !player.player_token) {
-          shouldFallback = true;
-          return;
-        }
-
-        ({ res, data } = await claim({
-          code,
-          player_id: player.id,
-          player_token: player.player_token,
-        }));
-      }
-
-      if (!isLikelyValidClaimResponse(data)) {
-        shouldFallback = true;
-        return;
-      }
-
-      renderClaimResult(data);
-      setStatus('Listo para seguir escaneando.');
-    } catch (_err) {
-      shouldFallback = true;
-    } finally {
-      if (shouldFallback) {
-        await redirectToClaim(code);
-        return;
-      }
-
-      if (resumeBtn) resumeBtn.style.display = 'block';
-      if (scanner && scanner.isScanning) {
-        try {
-          scanner.resume();
-        } catch (_err) {
-          // ignore
-        }
-      }
-      busy = false;
-    }
-  }
-
   async function handleDecodedText(decodedText) {
     if (handlingDecode) return;
     handlingDecode = true;
@@ -267,7 +138,7 @@
 
     lastCode = code;
     lastCodeAt = now;
-    await claimInline(code);
+    await redirectToClaim(code);
     handlingDecode = false;
   }
 
@@ -276,7 +147,7 @@
       return;
     }
     if (busy) {
-      setStatus('Procesando QR…');
+      setStatus('Esperando redirección…');
       return;
     }
 
@@ -343,25 +214,6 @@
   switchCamBtn.addEventListener('click', () => {
     switchCamera();
   });
-
-  if (resumeBtn) {
-    resumeBtn.addEventListener('click', () => {
-      resumeBtn.style.display = 'none';
-      clearResult();
-
-      if (scanner && scanner.isScanning) {
-        try {
-          scanner.resume();
-          setStatus('Cámara activa. Apuntá al QR.');
-        } catch (_err) {
-          startScanner();
-        }
-        return;
-      }
-
-      startScanner();
-    });
-  }
 
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
