@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="es-AR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Host Muévete Luz Verde</title>
+  <style>
+    body{margin:0;font-family:system-ui,Arial;background:#0f172a;color:#e2e8f0}
+    .wrap{padding:14px}
+    h1{font-size:clamp(36px,6vw,72px);margin:0 0 12px}
+    .panel,.card{background:#111827;border:1px solid #334155;border-radius:12px;padding:12px;margin-bottom:12px}
+    .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    input,button,select{padding:10px;border-radius:8px;border:1px solid #334155;background:#0f172a;color:#e2e8f0}
+    button{cursor:pointer;background:#22c55e;color:#052e16;border:0;font-weight:700}
+    button.secondary{background:#334155;color:#e2e8f0}
+    .stats{display:flex;gap:10px;flex-wrap:wrap}
+    .stat{background:#1e293b;border-radius:10px;padding:10px;min-width:120px;text-align:center}
+    .big{font-size:32px;font-weight:800}
+    #playersGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px}
+    .p{position:relative;background:#1e293b;border:1px solid #334155;border-radius:10px;padding:10px;min-height:82px}
+    .dead{background:#7f1d1d;border-color:#ef4444}
+    .dead::after{content:'✖';position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:66px;color:#fecaca;background:rgba(127,29,29,.45)}
+    .err{color:#fca5a5;font-weight:700}
+    .muted{opacity:.8}
+    .lists{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>MUÉVETE LUZ VERDE</h1>
+    <div class="panel">
+      <div class="row">
+        <label>Sensibilidad
+          <input id="sensitivity" type="range" min="1" max="10" step="1" value="5" />
+          <span id="sensVal">5</span>
+        </label>
+        <label>Puntos base <input id="basePoints" type="number" min="1" value="10" style="width:110px"></label>
+        <label>Descanso (s) <input id="restSeconds" type="number" min="5" value="60" style="width:110px"></label>
+        <button id="btnUpdate">Guardar config</button>
+        <button id="btnReset">Crear / Reiniciar sesión</button>
+        <button id="btnStart">Iniciar ronda</button>
+        <button id="btnEnd" class="secondary">Terminar ronda (manual)</button>
+        <button id="btnFinish" class="secondary">Finalizar juego</button>
+        <button id="btnSound" class="secondary">Probar sonido</button>
+      </div>
+      <div id="error" class="err"></div>
+    </div>
+
+    <div class="card">
+      <div class="stats">
+        <div class="stat"><div class="muted">Estado</div><div id="state" class="big">WAITING</div></div>
+        <div class="stat"><div class="muted">Vivos</div><div id="alive" class="big">0</div></div>
+        <div class="stat"><div class="muted">Eliminados</div><div id="eliminated" class="big">0</div></div>
+        <div class="stat"><div class="muted">Total</div><div id="total" class="big">0</div></div>
+        <div class="stat"><div class="muted">Ronda</div><div id="round" class="big">0</div></div>
+        <div class="stat"><div class="muted">Descanso</div><div id="countdown" class="big">--</div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div id="playersGrid"></div>
+    </div>
+
+    <div class="lists">
+      <div class="card"><h3>Eliminados de esta ronda</h3><ul id="elims"></ul></div>
+      <div class="card"><h3>Pasan a la siguiente</h3><ul id="survivors"></ul></div>
+    </div>
+  </div>
+
+  <audio id="sound" preload="none" src="../assets/luzverde.mp3"></audio>
+  <script src="luzverde_host.js"></script>
+</body>
+</html>

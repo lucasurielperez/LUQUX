@@ -279,6 +279,27 @@ function get_or_create_qr_scanner_game(PDO $pdo): array {
   ];
 }
 
+function get_or_create_luzverde_game(PDO $pdo): array {
+  $stmt = $pdo->prepare('SELECT id, is_active FROM games WHERE code = ? LIMIT 1');
+  $stmt->execute(['luzverde']);
+  $row = $stmt->fetch();
+
+  if ($row) {
+    return [
+      'id' => (int) $row['id'],
+      'is_active' => (int) $row['is_active'],
+    ];
+  }
+
+  $ins = $pdo->prepare('INSERT INTO games (code, name, is_active, base_points) VALUES (?, ?, 1, 10)');
+  $ins->execute(['luzverde', 'Muévete Luz Verde']);
+
+  return [
+    'id' => (int) $pdo->lastInsertId(),
+    'is_active' => 1,
+  ];
+}
+
 function virus_secret(array $config): string {
   $secret = (string) ($config['virus_qr_secret'] ?? $config['admin_token'] ?? 'virus-secret');
   if (strlen($secret) < 16) {
@@ -391,6 +412,71 @@ function virus_start_session(PDO $pdo): array {
     'session_id' => $sessionId,
     'players_count' => count($playerIds),
   ];
+}
+
+
+function luzverde_threshold_for_level(int $level): float {
+  $level = max(1, min(10, $level));
+  return 32.0 - (($level - 1) * 2.8);
+}
+
+function luzverde_get_active_session(PDO $pdo): ?array {
+  $stmt = $pdo->query('SELECT * FROM luzverde_sessions WHERE is_active = 1 ORDER BY id DESC LIMIT 1');
+  $row = $stmt->fetch();
+  return $row ?: null;
+}
+
+function luzverde_get_session_with_counts(PDO $pdo, int $sessionId): array {
+  $sessionStmt = $pdo->prepare('SELECT * FROM luzverde_sessions WHERE id = ? LIMIT 1');
+  $sessionStmt->execute([$sessionId]);
+  $session = $sessionStmt->fetch();
+  if (!$session) {
+    fail('Sesión no encontrada', 404, 'SESSION_NOT_FOUND');
+  }
+
+  $countsStmt = $pdo->prepare(
+    'SELECT COUNT(*) AS total,
+            SUM(CASE WHEN eliminated_at IS NULL THEN 1 ELSE 0 END) AS alive,
+            SUM(CASE WHEN eliminated_at IS NOT NULL THEN 1 ELSE 0 END) AS eliminated
+     FROM luzverde_participants
+     WHERE session_id = ?'
+  );
+  $countsStmt->execute([$sessionId]);
+  $counts = $countsStmt->fetch() ?: ['total' => 0, 'alive' => 0, 'eliminated' => 0];
+
+  return [
+    'session' => $session,
+    'counts' => [
+      'total' => (int) ($counts['total'] ?? 0),
+      'alive' => (int) ($counts['alive'] ?? 0),
+      'eliminated' => (int) ($counts['eliminated'] ?? 0),
+    ],
+  ];
+}
+
+function luzverde_build_status_message(?array $session, ?array $me): string {
+  if (!$session) {
+    return 'Esperando que el host cree una sesión.';
+  }
+
+  $state = (string) ($session['state'] ?? 'WAITING');
+  if ($state === 'WAITING') {
+    return 'Esperando que arranque la ronda...';
+  }
+  if ($state === 'ACTIVE') {
+    if ($me && $me['eliminated_at'] !== null) {
+      return 'Eliminado. Esperá la próxima ronda.';
+    }
+    return 'EN JUEGO – QUEDATE QUIETO';
+  }
+  if ($state === 'REST') {
+    return 'Descanso entre rondas.';
+  }
+  if ($state === 'FINISHED') {
+    return 'Juego terminado.';
+  }
+
+  return 'Estado actualizado.';
 }
 
 function validate_display_name(string $displayName): string {
@@ -595,6 +681,9 @@ $publicActions = [
   'qr_claim',
   'public_leaderboard_top',
   'public_players_active',
+  'luzverde_join',
+  'luzverde_status',
+  'luzverde_motion',
 ];
 
 if (!in_array($action, $publicActions, true) && !admin_is_authorized($config)) {
@@ -616,6 +705,7 @@ try {
 
 get_or_create_virus_game($pdo);
 get_or_create_qr_scanner_game($pdo);
+get_or_create_luzverde_game($pdo);
 
 try {
   if ($method === 'GET' && $action === 'ping') {
@@ -1332,6 +1422,388 @@ try {
     $stmt = $pdo->prepare('UPDATE qr_claims SET ' . implode(', ', $updates) . ' WHERE status = ? AND applied_points = 0 AND claimed_at < ' . $thresholdExpr);
     $stmt->execute($params);
     ok(['mode' => $mode, 'older_than_minutes' => $minutes, 'affected' => $stmt->rowCount()]);
+  }
+
+
+  if ($method === 'POST' && $action === 'luzverde_join') {
+    $b = body_json();
+    $playerId = resolve_player_id_from_body($pdo, $b);
+    $active = luzverde_get_active_session($pdo);
+
+    if (!$active || (string) $active['state'] === 'FINISHED') {
+      fail('No hay sesión activa de Luz Verde', 409, 'NO_ACTIVE_SESSION');
+    }
+
+    $ins = $pdo->prepare(
+      'INSERT INTO luzverde_participants (session_id, player_id, joined_at)
+       VALUES (?, ?, NOW())
+       ON DUPLICATE KEY UPDATE joined_at = joined_at'
+    );
+    $ins->execute([(int) $active['id'], $playerId]);
+
+    $meStmt = $pdo->prepare('SELECT * FROM luzverde_participants WHERE session_id = ? AND player_id = ? LIMIT 1');
+    $meStmt->execute([(int) $active['id'], $playerId]);
+    $me = $meStmt->fetch();
+
+    ok([
+      'session' => [
+        'id' => (int) $active['id'],
+        'state' => (string) $active['state'],
+        'round_no' => (int) $active['round_no'],
+        'rest_ends_at' => $active['rest_ends_at'],
+        'sensitivity_level' => (int) $active['sensitivity_level'],
+        'base_points' => (int) $active['base_points'],
+      ],
+      'me' => [
+        'status' => ($me && $me['eliminated_at'] === null) ? 'alive' : 'eliminated',
+        'eliminated_order' => $me ? ($me['eliminated_order'] !== null ? (int) $me['eliminated_order'] : null) : null,
+        'eliminated_round' => $me ? ($me['eliminated_round'] !== null ? (int) $me['eliminated_round'] : null) : null,
+      ],
+      'message' => luzverde_build_status_message($active, $me ?: null),
+    ]);
+  }
+
+  if (($method === 'GET' || $method === 'POST') && $action === 'luzverde_status') {
+    $payload = ($method === 'POST') ? body_json() : $_GET;
+    $playerId = resolve_player_id($pdo, $payload);
+    $active = luzverde_get_active_session($pdo);
+
+    if (!$active) {
+      ok([
+        'session' => null,
+        'me' => ['status' => 'alive', 'eliminated_order' => null, 'eliminated_round' => null],
+        'message' => luzverde_build_status_message(null, null),
+      ]);
+    }
+
+    $meStmt = $pdo->prepare('SELECT * FROM luzverde_participants WHERE session_id = ? AND player_id = ? LIMIT 1');
+    $meStmt->execute([(int) $active['id'], $playerId]);
+    $me = $meStmt->fetch();
+
+    $winnerStmt = $pdo->prepare(
+      'SELECT p.display_name
+       FROM luzverde_participants lp
+       INNER JOIN players p ON p.id = lp.player_id
+       WHERE lp.session_id = ? AND lp.eliminated_at IS NULL
+       ORDER BY lp.id ASC
+       LIMIT 1'
+    );
+    $winnerStmt->execute([(int) $active['id']]);
+    $winnerName = $winnerStmt->fetchColumn();
+
+    ok([
+      'session' => [
+        'id' => (int) $active['id'],
+        'state' => (string) $active['state'],
+        'round_no' => (int) $active['round_no'],
+        'rest_ends_at' => $active['rest_ends_at'],
+        'sensitivity_level' => (int) $active['sensitivity_level'],
+        'base_points' => (int) $active['base_points'],
+        'winner_name' => $winnerName !== false ? (string) $winnerName : null,
+      ],
+      'me' => [
+        'status' => ($me && $me['eliminated_at'] === null) ? 'alive' : 'eliminated',
+        'eliminated_order' => $me && $me['eliminated_order'] !== null ? (int) $me['eliminated_order'] : null,
+        'eliminated_round' => $me && $me['eliminated_round'] !== null ? (int) $me['eliminated_round'] : null,
+      ],
+      'message' => luzverde_build_status_message($active, $me ?: null),
+    ]);
+  }
+
+  if ($method === 'POST' && $action === 'luzverde_motion') {
+    $b = body_json();
+    $playerId = resolve_player_id_from_body($pdo, $b);
+    $motionScore = (float) ($b['motion_score'] ?? 0);
+
+    $active = luzverde_get_active_session($pdo);
+    if (!$active || (string) $active['state'] !== 'ACTIVE') {
+      ok(['ignored' => true, 'reason' => 'NOT_ACTIVE']);
+    }
+
+    $sessionId = (int) $active['id'];
+    $participantStmt = $pdo->prepare('SELECT * FROM luzverde_participants WHERE session_id = ? AND player_id = ? LIMIT 1');
+    $participantStmt->execute([$sessionId, $playerId]);
+    $participant = $participantStmt->fetch();
+    if (!$participant) {
+      ok(['ignored' => true, 'reason' => 'NOT_JOINED']);
+    }
+
+    $upMotion = $pdo->prepare('UPDATE luzverde_participants SET last_motion_score = ? WHERE id = ?');
+    $upMotion->execute([$motionScore, (int) $participant['id']]);
+
+    if ($participant['eliminated_at'] !== null) {
+      ok(['ignored' => true, 'reason' => 'ALREADY_ELIMINATED']);
+    }
+
+    $threshold = luzverde_threshold_for_level((int) $active['sensitivity_level']);
+    if ($motionScore <= $threshold) {
+      ok(['ignored' => true, 'threshold' => $threshold]);
+    }
+
+    $pdo->beginTransaction();
+
+    $sessionLock = $pdo->prepare('SELECT * FROM luzverde_sessions WHERE id = ? LIMIT 1 FOR UPDATE');
+    $sessionLock->execute([$sessionId]);
+    $sessionLocked = $sessionLock->fetch();
+    if (!$sessionLocked || (string) $sessionLocked['state'] !== 'ACTIVE') {
+      $pdo->rollBack();
+      ok(['ignored' => true, 'reason' => 'ROUND_FINISHED']);
+    }
+
+    $partLock = $pdo->prepare('SELECT * FROM luzverde_participants WHERE session_id = ? AND player_id = ? LIMIT 1 FOR UPDATE');
+    $partLock->execute([$sessionId, $playerId]);
+    $participantLocked = $partLock->fetch();
+    if (!$participantLocked || $participantLocked['eliminated_at'] !== null) {
+      $pdo->rollBack();
+      ok(['ignored' => true, 'reason' => 'ALREADY_ELIMINATED']);
+    }
+
+    $maxOrderStmt = $pdo->prepare('SELECT COALESCE(MAX(eliminated_order), 0) FROM luzverde_participants WHERE session_id = ? FOR UPDATE');
+    $maxOrderStmt->execute([$sessionId]);
+    $nextOrder = (int) $maxOrderStmt->fetchColumn() + 1;
+
+    $elimStmt = $pdo->prepare(
+      'UPDATE luzverde_participants
+       SET eliminated_at = NOW(), eliminated_order = ?, eliminated_round = ?, last_motion_score = ?
+       WHERE id = ?'
+    );
+    $elimStmt->execute([$nextOrder, (int) $sessionLocked['round_no'], $motionScore, (int) $participantLocked['id']]);
+
+    $roundEliminated = (int) $sessionLocked['round_eliminated_count'] + 1;
+    $aliveStart = (int) $sessionLocked['round_alive_start'];
+    $target = $aliveStart >= 2 ? max(1, (int) floor($aliveStart / 2)) : 0;
+    $shouldRest = $target > 0 && $roundEliminated >= $target;
+
+    $updateSessionSql = 'UPDATE luzverde_sessions SET round_eliminated_count = ?, updated_at = NOW()';
+    $params = [$roundEliminated];
+    if ($shouldRest) {
+      $updateSessionSql .= ', state = ?, rest_ends_at = DATE_ADD(NOW(), INTERVAL rest_seconds SECOND)';
+      $params[] = 'REST';
+    }
+    $updateSessionSql .= ' WHERE id = ?';
+    $params[] = $sessionId;
+    $updSession = $pdo->prepare($updateSessionSql);
+    $updSession->execute($params);
+
+    $pdo->commit();
+
+    ok([
+      'eliminated' => true,
+      'threshold' => $threshold,
+      'auto_rest' => $shouldRest,
+    ]);
+  }
+
+  if ($method === 'GET' && $action === 'admin_luzverde_state') {
+    $active = luzverde_get_active_session($pdo);
+    if (!$active) {
+      ok(['session' => null, 'participants' => [], 'totals' => ['total' => 0, 'alive' => 0, 'eliminated' => 0]]);
+    }
+
+    $sessionId = (int) $active['id'];
+    $participantsStmt = $pdo->prepare(
+      'SELECT lp.player_id, p.display_name, p.public_code, lp.eliminated_at, lp.eliminated_order, lp.eliminated_round, lp.last_motion_score
+       FROM luzverde_participants lp
+       INNER JOIN players p ON p.id = lp.player_id
+       WHERE lp.session_id = ?
+       ORDER BY (lp.eliminated_at IS NULL) DESC, lp.eliminated_order ASC, p.display_name ASC'
+    );
+    $participantsStmt->execute([$sessionId]);
+    $participants = $participantsStmt->fetchAll();
+
+    $counts = luzverde_get_session_with_counts($pdo, $sessionId)['counts'];
+
+    $eliminatedThisRoundStmt = $pdo->prepare(
+      'SELECT p.display_name, p.public_code
+       FROM luzverde_participants lp
+       INNER JOIN players p ON p.id = lp.player_id
+       WHERE lp.session_id = ? AND lp.eliminated_round = ?
+       ORDER BY lp.eliminated_order ASC'
+    );
+    $eliminatedThisRoundStmt->execute([$sessionId, (int) $active['round_no']]);
+
+    $survivorsStmt = $pdo->prepare(
+      'SELECT p.display_name, p.public_code
+       FROM luzverde_participants lp
+       INNER JOIN players p ON p.id = lp.player_id
+       WHERE lp.session_id = ? AND lp.eliminated_at IS NULL
+       ORDER BY p.display_name ASC'
+    );
+    $survivorsStmt->execute([$sessionId]);
+
+    ok([
+      'session' => [
+        'id' => $sessionId,
+        'state' => (string) $active['state'],
+        'round_no' => (int) $active['round_no'],
+        'sensitivity_level' => (int) $active['sensitivity_level'],
+        'base_points' => (int) $active['base_points'],
+        'rest_seconds' => (int) $active['rest_seconds'],
+        'rest_ends_at' => $active['rest_ends_at'],
+        'round_alive_start' => (int) $active['round_alive_start'],
+        'round_eliminated_count' => (int) $active['round_eliminated_count'],
+      ],
+      'participants' => $participants,
+      'totals' => $counts,
+      'eliminated_this_round' => $eliminatedThisRoundStmt->fetchAll(),
+      'survivors' => $survivorsStmt->fetchAll(),
+    ]);
+  }
+
+  if ($method === 'POST' && $action === 'admin_luzverde_update_config') {
+    $b = body_json();
+    $sensitivity = max(1, min(10, (int) ($b['sensitivity_level'] ?? 5)));
+    $restSeconds = max(5, min(600, (int) ($b['rest_seconds'] ?? 60)));
+    $basePoints = max(1, min(10000, (int) ($b['base_points'] ?? 10)));
+
+    $active = luzverde_get_active_session($pdo);
+    if (!$active) {
+      $ins = $pdo->prepare(
+        "INSERT INTO luzverde_sessions (is_active, state, round_no, sensitivity_level, base_points, rest_seconds, created_at, updated_at)
+         VALUES (1, 'WAITING', 0, ?, ?, ?, NOW(), NOW())"
+      );
+      $ins->execute([$sensitivity, $basePoints, $restSeconds]);
+      $active = luzverde_get_active_session($pdo);
+    } else {
+      $up = $pdo->prepare('UPDATE luzverde_sessions SET sensitivity_level = ?, rest_seconds = ?, base_points = ?, updated_at = NOW() WHERE id = ?');
+      $up->execute([$sensitivity, $restSeconds, $basePoints, (int) $active['id']]);
+      $active = luzverde_get_active_session($pdo);
+    }
+
+    ok(['session' => $active]);
+  }
+
+  if ($method === 'POST' && $action === 'admin_luzverde_reset_session') {
+    $b = body_json();
+    $sensitivity = max(1, min(10, (int) ($b['sensitivity_level'] ?? 5)));
+    $restSeconds = max(5, min(600, (int) ($b['rest_seconds'] ?? 60)));
+    $basePoints = max(1, min(10000, (int) ($b['base_points'] ?? 10)));
+
+    $pdo->beginTransaction();
+    $pdo->exec('UPDATE luzverde_sessions SET is_active = 0, updated_at = NOW() WHERE is_active = 1');
+
+    $ins = $pdo->prepare(
+      "INSERT INTO luzverde_sessions
+      (is_active, state, round_no, sensitivity_level, base_points, rest_seconds, rest_ends_at, round_alive_start, round_eliminated_count, created_at, updated_at)
+      VALUES (1, 'WAITING', 0, ?, ?, ?, NULL, 0, 0, NOW(), NOW())"
+    );
+    $ins->execute([$sensitivity, $basePoints, $restSeconds]);
+    $sessionId = (int) $pdo->lastInsertId();
+    $pdo->commit();
+
+    ok(['session_id' => $sessionId]);
+  }
+
+  if ($method === 'POST' && $action === 'admin_luzverde_start_round') {
+    $active = luzverde_get_active_session($pdo);
+    if (!$active) {
+      fail('No hay sesión activa', 409, 'NO_ACTIVE_SESSION');
+    }
+
+    $state = (string) $active['state'];
+    if ($state !== 'WAITING' && $state !== 'REST') {
+      fail('La ronda sólo puede iniciar desde WAITING o REST', 409, 'INVALID_STATE');
+    }
+
+    $countStmt = $pdo->prepare('SELECT COUNT(*) FROM luzverde_participants WHERE session_id = ? AND eliminated_at IS NULL');
+    $countStmt->execute([(int) $active['id']]);
+    $aliveCount = (int) $countStmt->fetchColumn();
+    if ($aliveCount < 2) {
+      fail('Se necesitan al menos 2 jugadores vivos para iniciar ronda', 409, 'NOT_ENOUGH_PLAYERS');
+    }
+
+    $up = $pdo->prepare(
+      "UPDATE luzverde_sessions
+       SET state = 'ACTIVE', round_no = round_no + 1, rest_ends_at = NULL,
+           round_alive_start = ?, round_eliminated_count = 0, updated_at = NOW()
+       WHERE id = ?"
+    );
+    $up->execute([$aliveCount, (int) $active['id']]);
+
+    ok(['round_started' => true, 'alive_start' => $aliveCount]);
+  }
+
+  if ($method === 'POST' && $action === 'admin_luzverde_end_round') {
+    $active = luzverde_get_active_session($pdo);
+    if (!$active) {
+      fail('No hay sesión activa', 409, 'NO_ACTIVE_SESSION');
+    }
+
+    $up = $pdo->prepare(
+      "UPDATE luzverde_sessions
+       SET state = 'REST', rest_ends_at = DATE_ADD(NOW(), INTERVAL rest_seconds SECOND), updated_at = NOW()
+       WHERE id = ?"
+    );
+    $up->execute([(int) $active['id']]);
+
+    ok(['ended' => true]);
+  }
+
+  if ($method === 'POST' && $action === 'admin_luzverde_finish_game') {
+    $active = luzverde_get_active_session($pdo);
+    if (!$active) {
+      fail('No hay sesión activa', 409, 'NO_ACTIVE_SESSION');
+    }
+
+    $sessionId = (int) $active['id'];
+    $participantsStmt = $pdo->prepare(
+      'SELECT lp.*, p.display_name, p.public_code
+       FROM luzverde_participants lp
+       INNER JOIN players p ON p.id = lp.player_id
+       WHERE lp.session_id = ?
+       ORDER BY lp.id ASC'
+    );
+    $participantsStmt->execute([$sessionId]);
+    $participants = $participantsStmt->fetchAll();
+    $total = count($participants);
+
+    if ($total < 2) {
+      fail('Se necesitan al menos 2 participantes para finalizar', 409, 'NOT_ENOUGH_PARTICIPANTS');
+    }
+
+    $alive = array_values(array_filter($participants, static fn(array $r): bool => $r['eliminated_at'] === null));
+    if (count($alive) !== 1) {
+      fail('Debe quedar exactamente 1 ganador vivo para finalizar', 409, 'INVALID_WINNER_COUNT');
+    }
+
+    $game = get_or_create_luzverde_game($pdo);
+    $scoreIns = $pdo->prepare(
+      "INSERT INTO score_events (player_id, event_type, game_id, points_delta, note)
+       VALUES (?, 'GAME_RESULT', ?, ?, ?)"
+    );
+
+    $summary = [];
+    foreach ($participants as $row) {
+      $isWinner = $row['eliminated_at'] === null;
+      $position = $isWinner ? $total : max(1, (int) $row['eliminated_order']);
+      $points = (int) $active['base_points'] * ($position - 1);
+      $note = sprintf('Muévete Luz Verde: Puesto %d de %d%s', $position, $total, $isWinner ? ' (Ganador)' : '');
+      if (!$isWinner && $row['eliminated_round'] !== null) {
+        $note .= ' - Ronda ' . (int) $row['eliminated_round'];
+      }
+      $scoreIns->execute([(int) $row['player_id'], (int) $game['id'], $points, $note]);
+
+      $summary[] = [
+        'player_id' => (int) $row['player_id'],
+        'display_name' => (string) $row['display_name'],
+        'public_code' => (string) $row['public_code'],
+        'points' => $points,
+        'position' => $position,
+        'winner' => $isWinner,
+      ];
+    }
+
+    $up = $pdo->prepare("UPDATE luzverde_sessions SET state = 'FINISHED', is_active = 0, updated_at = NOW() WHERE id = ?");
+    $up->execute([$sessionId]);
+
+    ok([
+      'winner' => [
+        'player_id' => (int) $alive[0]['player_id'],
+        'display_name' => (string) $alive[0]['display_name'],
+        'public_code' => (string) $alive[0]['public_code'],
+      ],
+      'results' => $summary,
+    ]);
   }
 
   if ($method === 'POST' && $action === 'sumador_start') {
