@@ -416,8 +416,52 @@ function virus_start_session(PDO $pdo): array {
 
 
 function luzverde_threshold_for_level(int $level): float {
-  $level = max(1, min(10, $level));
-  return 32.0 - (($level - 1) * 2.8);
+  $level = max(1, min(40, $level));
+  $maxThreshold = 8.0;
+  $minThreshold = 0.3;
+  return $maxThreshold - (($level - 1) * (($maxThreshold - $minThreshold) / 39));
+}
+
+function luzverde_get_alive_players(PDO $pdo, int $sessionId): array {
+  $stmt = $pdo->prepare(
+    'SELECT lp.player_id, p.display_name, p.public_code
+     FROM luzverde_participants lp
+     INNER JOIN players p ON p.id = lp.player_id
+     WHERE lp.session_id = ? AND lp.eliminated_at IS NULL
+     ORDER BY lp.id ASC'
+  );
+  $stmt->execute([$sessionId]);
+  return $stmt->fetchAll() ?: [];
+}
+
+function luzverde_get_winner_name(PDO $pdo, int $sessionId): ?string {
+  $alive = luzverde_get_alive_players($pdo, $sessionId);
+  if (count($alive) === 1) {
+    return (string) $alive[0]['display_name'];
+  }
+  return null;
+}
+
+function luzverde_finish_session_with_winner(PDO $pdo, array $session, array $winner): void {
+  $sessionId = (int) $session['id'];
+  $winnerPlayerId = (int) $winner['player_id'];
+  $winnerName = (string) $winner['display_name'];
+  $basePoints = (int) $session['base_points'];
+
+  $update = $pdo->prepare(
+    "UPDATE luzverde_sessions
+     SET state = 'FINISHED', round_eliminated_count = 0, rest_ends_at = NULL, updated_at = NOW()
+     WHERE id = ?"
+  );
+  $update->execute([$sessionId]);
+
+  $game = get_or_create_luzverde_game($pdo);
+  $note = sprintf('Muévete Luz Verde: Ganador automático (%s)', $winnerName);
+  $scoreIns = $pdo->prepare(
+    "INSERT INTO score_events (player_id, event_type, game_id, points_delta, note)
+     VALUES (?, 'GAME_RESULT', ?, ?, ?)"
+  );
+  $scoreIns->execute([$winnerPlayerId, (int) $game['id'], $basePoints, $note]);
 }
 
 function luzverde_get_active_session(PDO $pdo): ?array {
@@ -1480,16 +1524,7 @@ try {
     $meStmt->execute([(int) $active['id'], $playerId]);
     $me = $meStmt->fetch();
 
-    $winnerStmt = $pdo->prepare(
-      'SELECT p.display_name
-       FROM luzverde_participants lp
-       INNER JOIN players p ON p.id = lp.player_id
-       WHERE lp.session_id = ? AND lp.eliminated_at IS NULL
-       ORDER BY lp.id ASC
-       LIMIT 1'
-    );
-    $winnerStmt->execute([(int) $active['id']]);
-    $winnerName = $winnerStmt->fetchColumn();
+    $winnerName = luzverde_get_winner_name($pdo, (int) $active['id']);
 
     ok([
       'session' => [
@@ -1499,7 +1534,7 @@ try {
         'rest_ends_at' => $active['rest_ends_at'],
         'sensitivity_level' => (int) $active['sensitivity_level'],
         'base_points' => (int) $active['base_points'],
-        'winner_name' => $winnerName !== false ? (string) $winnerName : null,
+        'winner_name' => $winnerName,
       ],
       'me' => [
         'status' => ($me && $me['eliminated_at'] === null) ? 'alive' : 'eliminated',
@@ -1569,6 +1604,28 @@ try {
     );
     $elimStmt->execute([$nextOrder, (int) $sessionLocked['round_no'], $motionScore, (int) $participantLocked['id']]);
 
+    $aliveStmt = $pdo->prepare(
+      'SELECT lp.player_id, p.display_name, p.public_code
+       FROM luzverde_participants lp
+       INNER JOIN players p ON p.id = lp.player_id
+       WHERE lp.session_id = ? AND lp.eliminated_at IS NULL
+       ORDER BY lp.id ASC
+       FOR UPDATE'
+    );
+    $aliveStmt->execute([$sessionId]);
+    $alivePlayers = $aliveStmt->fetchAll() ?: [];
+
+    if (count($alivePlayers) === 1) {
+      luzverde_finish_session_with_winner($pdo, $sessionLocked, $alivePlayers[0]);
+      $pdo->commit();
+      ok([
+        'eliminated' => true,
+        'threshold' => $threshold,
+        'auto_finished' => true,
+        'winner_name' => (string) $alivePlayers[0]['display_name'],
+      ]);
+    }
+
     $roundEliminated = (int) $sessionLocked['round_eliminated_count'] + 1;
     $aliveStart = (int) $sessionLocked['round_alive_start'];
     $target = $aliveStart >= 2 ? max(1, (int) floor($aliveStart / 2)) : 0;
@@ -1591,6 +1648,7 @@ try {
       'eliminated' => true,
       'threshold' => $threshold,
       'auto_rest' => $shouldRest,
+      'auto_finished' => false,
     ]);
   }
 
@@ -1652,7 +1710,7 @@ try {
 
   if ($method === 'POST' && $action === 'admin_luzverde_update_config') {
     $b = body_json();
-    $sensitivity = max(1, min(10, (int) ($b['sensitivity_level'] ?? 5)));
+    $sensitivity = max(1, min(40, (int) ($b['sensitivity_level'] ?? 15)));
     $restSeconds = max(5, min(600, (int) ($b['rest_seconds'] ?? 60)));
     $basePoints = max(1, min(10000, (int) ($b['base_points'] ?? 10)));
 
@@ -1675,7 +1733,7 @@ try {
 
   if ($method === 'POST' && $action === 'admin_luzverde_reset_session') {
     $b = body_json();
-    $sensitivity = max(1, min(10, (int) ($b['sensitivity_level'] ?? 5)));
+    $sensitivity = max(1, min(40, (int) ($b['sensitivity_level'] ?? 15)));
     $restSeconds = max(5, min(600, (int) ($b['rest_seconds'] ?? 60)));
     $basePoints = max(1, min(10000, (int) ($b['base_points'] ?? 10)));
 

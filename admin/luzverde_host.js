@@ -8,6 +8,7 @@
   const elBase = $('basePoints');
   const elRest = $('restSeconds');
   const sound = $('sound');
+  let editingConfig = false;
 
   function token() {
     return localStorage.getItem('admin_token') || '';
@@ -35,7 +36,7 @@
 
   function updateConfigBody() {
     return {
-      sensitivity_level: Number(elSens.value || 5),
+      sensitivity_level: Number(elSens.value || 15),
       base_points: Number(elBase.value || 10),
       rest_seconds: Number(elRest.value || 60),
     };
@@ -51,8 +52,10 @@
     $('round').textContent = session?.round_no || 0;
 
     if (session) {
-      elSens.value = session.sensitivity_level;
-      elSensVal.textContent = session.sensitivity_level;
+      if (!editingConfig) {
+        elSens.value = session.sensitivity_level;
+        elSensVal.textContent = session.sensitivity_level;
+      }
       elBase.value = session.base_points;
       elRest.value = session.rest_seconds;
 
@@ -111,6 +114,10 @@
   $('btnSound').onclick = () => sound.play().catch(() => {});
 
   elSens.oninput = () => { elSensVal.textContent = elSens.value; };
+  elSens.addEventListener('mousedown', () => { editingConfig = true; });
+  elSens.addEventListener('touchstart', () => { editingConfig = true; });
+  elSens.addEventListener('mouseup', () => { editingConfig = false; });
+  elSens.addEventListener('touchend', () => { editingConfig = false; });
 
   setInterval(refresh, 1000);
   refresh();

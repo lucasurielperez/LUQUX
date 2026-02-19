@@ -47,7 +47,8 @@
   }
 
   function handleMotion(ev) {
-    if (!sensorEnabled || session?.state !== 'ACTIVE' || me?.status !== 'alive') return;
+    if (session?.state !== 'ACTIVE') return;
+    if (!sensorEnabled || me?.status !== 'alive') return;
 
     const acc = ev.accelerationIncludingGravity || ev.acceleration || { x: 0, y: 0, z: 0 };
     const x = Number(acc.x || 0);
@@ -122,6 +123,8 @@
       } else if (session.state === 'REST') {
         setScreen('neutral', 'Descanso', data.message || 'Esperando próxima ronda…');
       } else if (session.state === 'FINISHED') {
+        sensorEnabled = false;
+        motionBuffer = [];
         const winner = session.winner_name ? `Ganador: ${session.winner_name}` : 'Juego terminado';
         setScreen('neutral', 'Juego terminado', winner);
       } else {
