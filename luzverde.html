@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="es-AR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Muévete Luz Verde</title>
+  <style>
+    body{margin:0;font-family:system-ui,Arial,sans-serif;background:#111827;color:#fff}
+    .screen{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px;box-sizing:border-box}
+    .green{background:#16a34a}
+    .red{background:#dc2626}
+    .neutral{background:#111827}
+    h1{font-size:clamp(30px,8vw,64px);margin:0 0 12px}
+    p{font-size:clamp(18px,4vw,28px);margin:8px 0}
+    .status{opacity:.92}
+    .hidden{display:none}
+    button{border:0;background:#22c55e;color:#052e16;padding:16px 24px;border-radius:12px;font-size:24px;font-weight:700;cursor:pointer}
+    .offline{position:fixed;top:12px;left:12px;background:#f59e0b;color:#111;padding:6px 10px;border-radius:8px;font-weight:700}
+  </style>
+</head>
+<body>
+  <div id="offline" class="offline hidden">Sin conexión</div>
+  <main id="app" class="screen neutral">
+    <h1 id="title">Conectando…</h1>
+    <p id="message" class="status">Inicializando jugador…</p>
+    <button id="sensorBtn" class="hidden" type="button">Habilitar sensores</button>
+  </main>
+
+  <script src="admin/player_context.js"></script>
+  <script src="luzverde.js"></script>
+</body>
+</html>
