@@ -18,6 +18,8 @@
     .big{font-size:32px;font-weight:800}
     #playersGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px}
     .p{position:relative;background:#1e293b;border:1px solid #334155;border-radius:10px;padding:10px;min-height:82px}
+    .warn{background:#78350f;border-color:#f59e0b}
+    .offline{background:#3f3f46;border-color:#f97316}
     .dead{background:#7f1d1d;border-color:#ef4444}
     .dead::after{content:'✖';position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:66px;color:#fecaca;background:rgba(127,29,29,.45)}
     .err{color:#fca5a5;font-weight:700}
@@ -51,6 +53,7 @@
         <div class="stat"><div class="muted">Estado</div><div id="state" class="big">WAITING</div></div>
         <div class="stat"><div class="muted">Vivos</div><div id="alive" class="big">0</div></div>
         <div class="stat"><div class="muted">Eliminados</div><div id="eliminated" class="big">0</div></div>
+        <div class="stat"><div class="muted">No listos</div><div id="pending" class="big">0</div></div>
         <div class="stat"><div class="muted">Total</div><div id="total" class="big">0</div></div>
         <div class="stat"><div class="muted">Ronda</div><div id="round" class="big">0</div></div>
         <div class="stat"><div class="muted">Descanso</div><div id="countdown" class="big">--</div></div>
