@@ -15,6 +15,9 @@
   let statusTimer = null;
   let sensorEnabled = false;
   let permissionRequested = false;
+  let listenersAttached = false;
+  let motionTimer = null;
+  let lastSensorTapAt = 0;
   let motionBuffer = [];
   let lastMotionSentAt = 0;
   let lastMagnitude = null;
@@ -137,26 +140,59 @@
   }
 
   async function requestSensorPermission() {
-    if (permissionRequested) return;
+    if (permissionRequested || sensorEnabled) return;
     permissionRequested = true;
+    setScreen('neutral', 'Habilitando sensores…', 'Esperá un momento.');
+
+    let granted = true;
+
+    function markPermissionFailure(title, msg) {
+      granted = false;
+      permissionRequested = false;
+      sensorBtn.classList.remove('hidden');
+      setScreen('neutral', title, msg);
+    }
 
     if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
       try {
-        const result = await DeviceMotionEvent.requestPermission();
-        if (result !== 'granted') {
-          setScreen('neutral', 'Permiso denegado', 'Necesitás habilitar sensores para jugar.');
+        const motionResult = await DeviceMotionEvent.requestPermission();
+        if (motionResult !== 'granted') {
+          markPermissionFailure('Permiso denegado', 'No se habilitaron los sensores. Reintentá.');
           return;
         }
       } catch (_err) {
-        setScreen('neutral', 'Permiso de sensores', 'No se pudo solicitar permiso.');
+        markPermissionFailure('Permiso de sensores', 'No se pudo solicitar permiso. Reintentá.');
         return;
       }
     }
 
+    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+      try {
+        const orientationResult = await DeviceOrientationEvent.requestPermission();
+        if (orientationResult !== 'granted') {
+          markPermissionFailure('Permiso denegado', 'No se habilitó orientación. Reintentá.');
+          return;
+        }
+      } catch (_err) {
+        markPermissionFailure('Permiso de orientación', 'No se pudo solicitar permiso. Reintentá.');
+        return;
+      }
+    }
+
+    if (!granted) return;
+
     sensorEnabled = true;
+    permissionRequested = false;
     sensorBtn.classList.add('hidden');
-    window.addEventListener('devicemotion', handleMotion, { passive: true });
-    setInterval(sendMotionLoop, MOTION_MS);
+
+    if (!listenersAttached) {
+      window.addEventListener('devicemotion', handleMotion, { passive: true });
+      listenersAttached = true;
+    }
+
+    if (!motionTimer) {
+      motionTimer = setInterval(sendMotionLoop, MOTION_MS);
+    }
   }
 
   async function init() {
@@ -165,8 +201,10 @@
       await api('luzverde_join', 'POST', identityPayload());
       setScreen('neutral', 'Esperando que arranque la ronda…', 'Conectado al juego.');
 
-      const needsButton = typeof DeviceMotionEvent !== 'undefined'
-        && typeof DeviceMotionEvent.requestPermission === 'function';
+      const needsButton = (typeof DeviceMotionEvent !== 'undefined'
+        && typeof DeviceMotionEvent.requestPermission === 'function')
+        || (typeof DeviceOrientationEvent !== 'undefined'
+        && typeof DeviceOrientationEvent.requestPermission === 'function');
 
       if (needsButton) {
         sensorBtn.classList.remove('hidden');
@@ -181,6 +219,16 @@
     }
   }
 
-  sensorBtn.addEventListener('click', requestSensorPermission);
+  function onSensorButtonTap(ev) {
+    if (ev && ev.type === 'touchend') ev.preventDefault();
+
+    const now = Date.now();
+    if (now - lastSensorTapAt < 500) return;
+    lastSensorTapAt = now;
+    requestSensorPermission();
+  }
+
+  sensorBtn.addEventListener('click', onSensorButtonTap);
+  sensorBtn.addEventListener('touchend', onSensorButtonTap, { passive: false });
   init();
 })();
