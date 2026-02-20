@@ -42,21 +42,13 @@
     };
   }
 
-  function statusLabel(player) {
-    if (!player.armed) return 'NO LISTO';
-    if (player.eliminated_at) return `Eliminado (${player.eliminated_reason || 'MOTION_DETECTED'})`;
-    if (player.online_status === 'OFFLINE') return 'OFFLINE (a punto de perder)';
-    return 'Vivo';
-  }
-
   function renderState(data) {
     const session = data.session || null;
-    const totals = data.totals || { total: 0, alive: 0, eliminated: 0, pending: 0 };
+    const totals = data.totals || { total: 0, alive: 0, eliminated: 0 };
     $('state').textContent = session?.state || 'WAITING';
     $('alive').textContent = totals.alive;
     $('eliminated').textContent = totals.eliminated;
     $('total').textContent = totals.total;
-    $('pending').textContent = totals.pending || 0;
     $('round').textContent = session?.round_no || 0;
 
     if (session) {
@@ -78,10 +70,10 @@
 
     const players = Array.isArray(data.participants) ? data.participants : [];
     $('playersGrid').innerHTML = players.map((p) => `
-      <div class="p ${p.eliminated_at ? 'dead' : ''} ${!p.armed ? 'warn' : ''} ${p.online_status === 'OFFLINE' ? 'offline' : ''}">
+      <div class="p ${p.eliminated_at ? 'dead' : ''}">
         <div><strong>${p.display_name}</strong></div>
         <div class="muted">${p.public_code}</div>
-        <div class="muted">${statusLabel(p)}</div>
+        <div class="muted">${p.eliminated_at ? 'Eliminado' : 'Vivo'}</div>
       </div>
     `).join('');
 

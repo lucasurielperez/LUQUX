@@ -1,9 +1,7 @@
 (function () {
   const API = 'api.php';
   const POLL_MS = 1000;
-  const MOTION_MS = 400;
-  const SENSOR_STALE_MS = 1200;
-  const KEEP_AWAKE_VIDEO_SRC = 'assets/keepalive.mp4';
+  const MOTION_MS = 300;
 
   const appEl = document.getElementById('app');
   const titleEl = document.getElementById('title');
@@ -13,18 +11,14 @@
 
   let player = null;
   let session = null;
-  let me = { status: 'alive', armed: false };
+  let me = { status: 'alive' };
+  let statusTimer = null;
   let sensorEnabled = false;
   let permissionRequested = false;
   let motionBuffer = [];
   let lastMotionSentAt = 0;
   let lastMagnitude = null;
   let lastOrientation = null;
-  let lastSensorEventAt = 0;
-  let statusTimer = null;
-  let motionTimer = null;
-  let wakeLockSentinel = null;
-  let keepAwakeVideo = null;
 
   function setScreen(mode, title, msg) {
     appEl.className = `screen ${mode}`;
@@ -52,91 +46,9 @@
     };
   }
 
-  function isAliveActiveRound() {
-    return session?.state === 'ACTIVE' && me?.status === 'alive';
-  }
-
-  function sensorsAreLive() {
-    return sensorEnabled && Date.now() - lastSensorEventAt <= SENSOR_STALE_MS;
-  }
-
-  function ensureKeepAwakeVideo() {
-    if (keepAwakeVideo) return keepAwakeVideo;
-    const video = document.createElement('video');
-    video.src = KEEP_AWAKE_VIDEO_SRC;
-    video.muted = true;
-    video.loop = true;
-    video.playsInline = true;
-    video.setAttribute('muted', '');
-    video.setAttribute('playsinline', '');
-    video.style.position = 'fixed';
-    video.style.width = '1px';
-    video.style.height = '1px';
-    video.style.opacity = '0';
-    video.style.pointerEvents = 'none';
-    document.body.appendChild(video);
-    keepAwakeVideo = video;
-    return keepAwakeVideo;
-  }
-
-  async function acquireWakeLock() {
-    if (!('wakeLock' in navigator) || wakeLockSentinel) return;
-    try {
-      wakeLockSentinel = await navigator.wakeLock.request('screen');
-      wakeLockSentinel.addEventListener('release', () => {
-        wakeLockSentinel = null;
-      });
-    } catch (_err) {
-      wakeLockSentinel = null;
-    }
-  }
-
-  async function startKeepAwake() {
-    await acquireWakeLock();
-    const video = ensureKeepAwakeVideo();
-    try {
-      await video.play();
-    } catch (_err) {
-      // iOS may require explicit gesture; this is retried on button click.
-    }
-  }
-
-  async function stopKeepAwake() {
-    if (wakeLockSentinel) {
-      try {
-        await wakeLockSentinel.release();
-      } catch (_err) {
-        // no-op
-      }
-      wakeLockSentinel = null;
-    }
-
-    if (keepAwakeVideo && !keepAwakeVideo.paused) {
-      keepAwakeVideo.pause();
-    }
-  }
-
-  async function armParticipant() {
-    if (!sensorEnabled || me?.armed) return;
-    if (!sensorsAreLive()) return;
-
-    try {
-      const data = await api('luzverde_arm', 'POST', {
-        ...identityPayload(),
-        client_ts: Date.now(),
-      });
-      if (data.armed) {
-        me.armed = true;
-      }
-    } catch (_err) {
-      // retried by heartbeat loop
-    }
-  }
-
   function handleMotion(ev) {
-    if (!sensorEnabled) return;
-
-    lastSensorEventAt = Date.now();
+    if (session?.state !== 'ACTIVE') return;
+    if (!sensorEnabled || me?.status !== 'alive') return;
 
     const acc = ev.accelerationIncludingGravity || ev.acceleration || { x: 0, y: 0, z: 0 };
     const x = Number(acc.x || 0);
@@ -158,36 +70,14 @@
     lastMagnitude = magnitude;
     lastOrientation = orientation;
 
-    if (isAliveActiveRound()) {
-      motionBuffer.push(score);
-    }
+    motionBuffer.push(score);
   }
 
-  async function postBackgroundPenalty(reason) {
-    if (!isAliveActiveRound() || !me.armed) return;
-
-    try {
-      await api('luzverde_motion', 'POST', {
-        ...identityPayload(),
-        motion_score: 9999,
-        reason,
-        client_ts: Date.now(),
-      });
-    } catch (_err) {
-      // Server offline timeout is source of truth.
-    }
-  }
-
-  async function sendHeartbeatLoop() {
-    if (!isAliveActiveRound() || !me.armed) return;
+  async function sendMotionLoop() {
+    if (!sensorEnabled || session?.state !== 'ACTIVE' || me?.status !== 'alive') return;
     const now = Date.now();
     if (now - lastMotionSentAt < MOTION_MS) return;
     lastMotionSentAt = now;
-
-    if (!sensorsAreLive()) {
-      offlineEl.classList.remove('hidden');
-      return;
-    }
 
     let motionScore = 0;
     if (motionBuffer.length) {
@@ -200,7 +90,6 @@
       const data = await api('luzverde_motion', 'POST', {
         ...identityPayload(),
         motion_score: Number(motionScore.toFixed(3)),
-        sensor_ok: true,
         client_ts: now,
       });
 
@@ -208,8 +97,7 @@
       if (data.eliminated) {
         me.status = 'eliminated';
         sensorEnabled = false;
-        await stopKeepAwake();
-        setScreen('red', 'ELIMINADO', 'Perdiste por moverte o salir de la app.');
+        setScreen('red', 'ELIMINADO', 'Te moviste durante la ronda.');
       }
     } catch (_err) {
       offlineEl.classList.remove('hidden');
@@ -220,37 +108,26 @@
     try {
       const data = await api('luzverde_status', 'POST', identityPayload());
       session = data.session;
-      me = data.me || { status: 'alive', armed: false };
+      me = data.me || { status: 'alive' };
       offlineEl.classList.add('hidden');
 
       if (!session) {
-        await stopKeepAwake();
         setScreen('neutral', 'Conectando…', data.message || 'Esperando sesión activa.');
         return;
       }
 
-      if (!me.armed) {
-        setScreen('neutral', 'Pendiente: habilitar sensores', 'Sin sensores activos no participás de la ronda.');
-        return;
-      }
-
       if (session.state === 'ACTIVE' && me.status === 'alive') {
-        await startKeepAwake();
-        setScreen('green', 'EN JUEGO – QUEDATE QUIETO', data.message || 'No te muevas ni salgas de la app.');
+        setScreen('green', 'EN JUEGO – QUEDATE QUIETO', data.message || 'No te muevas.');
       } else if (me.status === 'eliminated') {
-        await stopKeepAwake();
         setScreen('red', 'ELIMINADO', 'Esperá a que termine la ronda.');
       } else if (session.state === 'REST') {
-        await startKeepAwake();
         setScreen('neutral', 'Descanso', data.message || 'Esperando próxima ronda…');
       } else if (session.state === 'FINISHED') {
         sensorEnabled = false;
         motionBuffer = [];
-        await stopKeepAwake();
         const winner = session.winner_name ? `Ganador: ${session.winner_name}` : 'Juego terminado';
         setScreen('neutral', 'Juego terminado', winner);
       } else {
-        await startKeepAwake();
         setScreen('neutral', 'Esperando que arranque la ronda…', data.message || 'Preparado.');
       }
     } catch (_err) {
@@ -262,8 +139,6 @@
   async function requestSensorPermission() {
     if (permissionRequested) return;
     permissionRequested = true;
-
-    await startKeepAwake();
 
     if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
       try {
@@ -281,29 +156,14 @@
     sensorEnabled = true;
     sensorBtn.classList.add('hidden');
     window.addEventListener('devicemotion', handleMotion, { passive: true });
-    window.addEventListener('deviceorientation', handleMotion, { passive: true });
-  }
-
-  function bindBackgroundGuards() {
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'hidden') {
-        postBackgroundPenalty('VISIBILITY_HIDDEN');
-      } else {
-        acquireWakeLock();
-      }
-    });
-
-    window.addEventListener('pagehide', () => postBackgroundPenalty('PAGEHIDE'));
-    window.addEventListener('blur', () => postBackgroundPenalty('BLUR'));
-    document.addEventListener('freeze', () => postBackgroundPenalty('FREEZE'));
+    setInterval(sendMotionLoop, MOTION_MS);
   }
 
   async function init() {
     try {
       player = await window.PlayerContext.ensureActivePlayerForThisDevice();
-      const joined = await api('luzverde_join', 'POST', identityPayload());
-      me.armed = !(joined.needs_arm ?? true);
-      setScreen('neutral', 'Esperando que arranque la ronda…', 'Conectado al juego. Mantené la pantalla prendida y no salgas de la app.');
+      await api('luzverde_join', 'POST', identityPayload());
+      setScreen('neutral', 'Esperando que arranque la ronda…', 'Conectado al juego.');
 
       const needsButton = typeof DeviceMotionEvent !== 'undefined'
         && typeof DeviceMotionEvent.requestPermission === 'function';
@@ -314,12 +174,7 @@
         requestSensorPermission();
       }
 
-      motionTimer = setInterval(async () => {
-        await armParticipant();
-        await sendHeartbeatLoop();
-      }, MOTION_MS);
       statusTimer = setInterval(pollStatus, POLL_MS);
-      bindBackgroundGuards();
       pollStatus();
     } catch (err) {
       setScreen('neutral', 'No se pudo iniciar', err.message || 'Error');
