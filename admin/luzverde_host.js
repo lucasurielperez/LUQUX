@@ -42,13 +42,21 @@
     };
   }
 
+  function playerLabel(p) {
+    if (!p.armed) return 'No listo';
+    if (!p.eliminated_at) return 'Vivo';
+    if (p.eliminated_reason === 'SENSOR_OFFLINE') return 'Eliminado (OFFLINE)';
+    return 'Eliminado (MOTION)';
+  }
+
   function renderState(data) {
     const session = data.session || null;
-    const totals = data.totals || { total: 0, alive: 0, eliminated: 0 };
+    const totals = data.totals || { total: 0, alive: 0, eliminated: 0, not_ready: 0 };
     $('state').textContent = session?.state || 'WAITING';
     $('alive').textContent = totals.alive;
     $('eliminated').textContent = totals.eliminated;
     $('total').textContent = totals.total;
+    $('notReady').textContent = totals.not_ready || 0;
     $('round').textContent = session?.round_no || 0;
 
     if (session) {
@@ -73,7 +81,7 @@
       <div class="p ${p.eliminated_at ? 'dead' : ''}">
         <div><strong>${p.display_name}</strong></div>
         <div class="muted">${p.public_code}</div>
-        <div class="muted">${p.eliminated_at ? 'Eliminado' : 'Vivo'}</div>
+        <div class="muted">${playerLabel(p)}</div>
       </div>
     `).join('');
 

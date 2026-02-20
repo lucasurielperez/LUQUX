@@ -1,0 +1,5 @@
+ALTER TABLE luzverde_participants
+  ADD COLUMN armed TINYINT NOT NULL DEFAULT 0 AFTER player_id,
+  ADD COLUMN armed_at TIMESTAMP NULL DEFAULT NULL AFTER armed,
+  ADD COLUMN last_seen_at TIMESTAMP NULL DEFAULT NULL AFTER armed_at,
+  ADD COLUMN eliminated_reason VARCHAR(32) NULL DEFAULT NULL AFTER eliminated_round;
