@@ -13,9 +13,21 @@
     th{background:#f4f4f4;text-align:left}
     .card{border:1px solid #ddd;border-radius:10px;padding:12px;margin:12px 0}
     .muted{opacity:.7}
+    .top-nav{position:sticky;top:0;background:#fff;padding:10px 0;z-index:5}
+    .top-nav .row{gap:8px}
+    .nav-btn{display:inline-block;padding:8px 12px;border:1px solid #ddd;border-radius:999px;text-decoration:none;color:#222;background:#f8f8f8;font-weight:600}
   </style>
 </head>
 <body>
+  <div class="top-nav">
+    <div class="row">
+      <a class="nav-btn" href="../leaderboard.html" target="_blank" rel="noopener">Leaderboard</a>
+      <a class="nav-btn" href="../bracket.html" target="_blank" rel="noopener">Bracket</a>
+      <a class="nav-btn" href="admin.html">Juegos</a>
+      <a class="nav-btn" href="luzverde_host.html" target="_blank" rel="noopener">Luzverde Host</a>
+    </div>
+  </div>
+
   <h2>Admin (modo prueba)</h2>
 
   <div class="card">
@@ -119,9 +131,7 @@
     <h3>Leaderboard</h3>
     <div class="row">
       <button id="loadLb">Cargar leaderboard</button>
-      <a href="../leaderboard.html" target="_blank" rel="noopener">Abrir Leaderboard (proyector)</a>
       <a href="errors.html" target="_blank" rel="noopener">Abrir visor de errores</a>
-      <a href="luzverde_host.html" target="_blank" rel="noopener">Abrir Muévete Luz Verde (Host)</a>
     </div>
     <table id="lb">
       <thead><tr><th>#</th><th>Nombre</th><th>Código</th><th>Puntos</th></tr></thead>

@@ -19,6 +19,8 @@
     .muted { opacity: .8; font-size: 14px; }
     .hidden { display: none; }
     .player-option { width: 100%; text-align: left; padding: 14px; font-size: 20px; font-weight: 700; background: #ece4ff; color: #2f1b63; }
+    .shortcut-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin-top: 10px; }
+    .shortcut-btn { display: block; text-align: center; text-decoration: none; padding: 12px; border-radius: 10px; background: #5e35b1; color: #fff; font-weight: 600; }
     #status { min-height: 22px; font-weight: 600; }
   </style>
 </head>
@@ -27,7 +29,7 @@
     <section class="card">
       <h1>Bienvenidos al cumple de 40 de Lucas 🎉</h1>
       <p>Hoy vas a poder jugar mini juegos para sumar puntos, pero ojo: también podés perder puntos.</p>
-      <p class="muted">Registrate una vez por dispositivo y después podés continuar directo.</p>
+      <p class="muted">Registrate una vez por dispositivo y después elegí a qué juego querés entrar.</p>
     </section>
 
     <section id="newPlayer" class="card hidden">
@@ -41,7 +43,6 @@
     <section id="knownPlayer" class="card hidden">
       <p>Hola <strong id="knownName">—</strong> 👋</p>
       <div class="row">
-        <button id="continueBtn" class="primary">Continuar</button>
         <button id="changeNameBtn" class="secondary">Cambiar nombre</button>
         <button id="addSecondBtn" class="secondary hidden">Agregar segundo jugador</button>
       </div>
@@ -58,6 +59,16 @@
         <div class="row">
           <button id="saveSecondBtn" class="secondary">Guardar segundo jugador</button>
         </div>
+      </div>
+    </section>
+
+    <section id="gameShortcuts" class="card hidden">
+      <h2>Accesos directos</h2>
+      <p class="muted">Elegí un juego para empezar.</p>
+      <div class="shortcut-grid">
+        <a class="shortcut-btn" href="admin/qr_scanner.html">Lector QR</a>
+        <a class="shortcut-btn" href="admin/sumador.html">Sumador</a>
+        <a class="shortcut-btn" href="luzverde.html">Luz Verde</a>
       </div>
     </section>
 
