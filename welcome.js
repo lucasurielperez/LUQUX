@@ -13,6 +13,7 @@
   const knownNameEl = document.getElementById('knownName');
   const playerSelectorEl = document.getElementById('playerSelector');
   const playerSelectorListEl = document.getElementById('playerSelectorList');
+  const gameShortcutsEl = document.getElementById('gameShortcuts');
   const displayNameInput = document.getElementById('displayName');
   const renameInput = document.getElementById('renameInput');
   const secondNameInput = document.getElementById('secondNameInput');
@@ -21,7 +22,6 @@
   const statusEl = document.getElementById('status');
 
   const startBtn = document.getElementById('startBtn');
-  const continueBtn = document.getElementById('continueBtn');
   const changeNameBtn = document.getElementById('changeNameBtn');
   const saveNameBtn = document.getElementById('saveNameBtn');
   const addSecondBtn = document.getElementById('addSecondBtn');
@@ -94,6 +94,7 @@
     newPlayerEl.classList.add('hidden');
     playerSelectorEl.classList.add('hidden');
     knownPlayerEl.classList.remove('hidden');
+    gameShortcutsEl.classList.remove('hidden');
     addSecondBtn.classList.toggle('hidden', !showAddSecond);
     addSecondWrap.classList.add('hidden');
   }
@@ -102,12 +103,14 @@
     player = null;
     knownPlayerEl.classList.add('hidden');
     playerSelectorEl.classList.add('hidden');
+    gameShortcutsEl.classList.add('hidden');
     newPlayerEl.classList.remove('hidden');
   }
 
   function showSelector(list) {
     newPlayerEl.classList.add('hidden');
     knownPlayerEl.classList.add('hidden');
+    gameShortcutsEl.classList.add('hidden');
     playerSelectorEl.classList.remove('hidden');
     playerSelectorListEl.innerHTML = '';
 
@@ -118,15 +121,10 @@
       btn.addEventListener('click', function () {
         savePlayer(p);
         setStatus(`Jugador activo: ${p.display_name}.`);
-        goToGame();
+        showKnownPlayer(p, players.length < 2);
       });
       playerSelectorListEl.appendChild(btn);
     });
-  }
-
-  function goToGame() {
-    if (!player) return;
-    location.href = 'admin/qr_scanner.html';
   }
 
   async function bootstrap() {
@@ -172,17 +170,15 @@
     try {
       const data = await apiPost('player_register', { display_name: name, device_id: deviceId });
       savePlayer(data.player);
-      goToGame();
+      showKnownPlayer(data.player, true);
+      setStatus('Jugador registrado. Elegí un juego para empezar.');
+      displayNameInput.value = '';
     } catch (err) {
       const msg = /DEVICE_FULL/i.test(String(err.message)) ? 'Este celu ya tiene 2 jugadores cargados.' : err.message;
       setStatus(`No se pudo registrar: ${msg}`);
     } finally {
       startBtn.disabled = false;
     }
-  });
-
-  continueBtn.addEventListener('click', function () {
-    goToGame();
   });
 
   changeNameBtn.addEventListener('click', function () {
