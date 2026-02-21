@@ -921,6 +921,8 @@ try {
   }
 
   if ($method === 'GET' && $action === 'public_players_active') {
+    $includeAll = isset($_GET['include_all'])
+      && in_array(strtolower(trim((string) $_GET['include_all'])), ['1', 'true', 'yes', 'on'], true);
     $windowHours = isset($_GET['hours']) ? (int) $_GET['hours'] : 6;
     if ($windowHours <= 0) {
       $windowHours = 6;
@@ -987,7 +989,7 @@ try {
       $activeRows = $activePlayersStmt->fetchAll();
     }
 
-    if (empty($activeRows)) {
+    if ($includeAll || empty($activeRows)) {
       $fallbackStmt = $pdo->query(
         "SELECT p.id AS player_id,
                 p.display_name,
@@ -998,7 +1000,7 @@ try {
            FROM score_events se
            GROUP BY se.player_id
          ) tp ON tp.player_id = p.id
-         WHERE $playersIsActiveFilter
+         WHERE " . ($includeAll ? '1=1' : $playersIsActiveFilter) . "
          ORDER BY p.id ASC"
       );
       $activeRows = $fallbackStmt->fetchAll();

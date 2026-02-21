@@ -1,5 +1,5 @@
 (function () {
-  const PLAYERS_API = 'api.php?action=public_players_active';
+  const PLAYERS_API = 'api.php?action=public_players_active&include_all=1';
   const STATE_KEY = 'bracket_state_v1';
   const TOURNAMENT_NAME_KEY = 'bracket_tournament_name_v1';
   const ADJUST_POINTS_API = './api.php?action=adjust_points';
