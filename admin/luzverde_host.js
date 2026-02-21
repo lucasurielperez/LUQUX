@@ -49,6 +49,88 @@
     return 'Eliminado (MOTION)';
   }
 
+  function escapeHtml(value) {
+    return String(value)
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#39;');
+  }
+
+  function stageCols(count) {
+    if (count <= 2) return 2;
+    if (count <= 6) return 3;
+    if (count <= 12) return 4;
+    if (count <= 20) return 5;
+    if (count <= 30) return 6;
+    if (count <= 42) return 7;
+    return 8;
+  }
+
+  function renderStage(session, totals, players) {
+    const playing = session?.state === 'ACTIVE';
+    document.body.classList.toggle('playing', playing);
+    if (!playing) return;
+
+    $('stageRound').textContent = session?.round_no || 0;
+    $('stageAlive').textContent = totals.alive || 0;
+    $('stageEliminated').textContent = totals.eliminated || 0;
+
+    const grid = $('stageGrid');
+    const cols = stageCols(players.length || 1);
+    grid.style.setProperty('--stage-cols', String(cols));
+    grid.innerHTML = players.map((p) => {
+      const cls = [
+        'stageCard',
+        p.eliminated_at ? 'dead' : '',
+        !p.armed ? 'notReady' : '',
+      ].filter(Boolean).join(' ');
+      return `
+        <article class="${cls}">
+          <div class="name">${escapeHtml(p.display_name)}</div>
+          <div class="code">${escapeHtml(p.public_code)}</div>
+          <div class="state">${playerLabel(p)}</div>
+        </article>
+      `;
+    }).join('');
+
+    const title = totals.alive <= 1 ? '¡Último sobreviviente en juego!' : 'No te muevas cuando se corte la música.';
+    $('stageFooter').textContent = title;
+  }
+
+  function renderInformativeBanner(session, totals, eList, sList) {
+    const state = session?.state || 'WAITING';
+    const statusMessage = $('statusMessage');
+    const waitingDetail = $('waitingDetail');
+
+    if (state === 'WAITING') {
+      statusMessage.textContent = `Esperando para jugar · ${totals.total || 0} jugadores conectados (${totals.alive || 0} listos).`;
+      waitingDetail.textContent = (totals.not_ready || 0) > 0
+        ? `${totals.not_ready} jugadores todavía no habilitaron sensores.`
+        : 'Todos los jugadores conectados están listos para arrancar.';
+      return;
+    }
+
+    if (state === 'REST') {
+      const winners = sList.length ? sList.map((p) => p.display_name).join(', ') : 'Nadie';
+      const losers = eList.length ? eList.map((p) => p.display_name).join(', ') : 'Nadie';
+      statusMessage.textContent = `Ronda ${session.round_no} terminada. Ganaron: ${winners}.`;
+      waitingDetail.textContent = `Perdieron: ${losers}. Preparando próxima ronda...`;
+      return;
+    }
+
+    if (state === 'FINISHED') {
+      const winners = sList.length ? sList.map((p) => p.display_name).join(', ') : 'Sin ganador';
+      statusMessage.textContent = `Juego finalizado. Ganador(es): ${winners}.`;
+      waitingDetail.textContent = `Eliminados totales: ${totals.eliminated || 0}.`;
+      return;
+    }
+
+    statusMessage.textContent = `Ronda ${session?.round_no || 0} en curso.`;
+    waitingDetail.textContent = '';
+  }
+
   function renderState(data) {
     const session = data.session || null;
     const totals = data.totals || { total: 0, alive: 0, eliminated: 0, not_ready: 0 };
@@ -79,8 +161,8 @@
     const players = Array.isArray(data.participants) ? data.participants : [];
     $('playersGrid').innerHTML = players.map((p) => `
       <div class="p ${p.eliminated_at ? 'dead' : ''}">
-        <div><strong>${p.display_name}</strong></div>
-        <div class="muted">${p.public_code}</div>
+        <div><strong>${escapeHtml(p.display_name)}</strong></div>
+        <div class="muted">${escapeHtml(p.public_code)}</div>
         <div class="muted">${playerLabel(p)}</div>
       </div>
     `).join('');
@@ -88,8 +170,11 @@
     const eList = Array.isArray(data.eliminated_this_round) ? data.eliminated_this_round : [];
     const sList = Array.isArray(data.survivors) ? data.survivors : [];
 
-    $('elims').innerHTML = eList.map((p) => `<li>${p.display_name} (${p.public_code})</li>`).join('') || '<li>-</li>';
-    $('survivors').innerHTML = sList.map((p) => `<li>${p.display_name} (${p.public_code})</li>`).join('') || '<li>-</li>';
+    $('elims').innerHTML = eList.map((p) => `<li>${escapeHtml(p.display_name)} (${escapeHtml(p.public_code)})</li>`).join('') || '<li>-</li>';
+    $('survivors').innerHTML = sList.map((p) => `<li>${escapeHtml(p.display_name)} (${escapeHtml(p.public_code)})</li>`).join('') || '<li>-</li>';
+
+    renderInformativeBanner(session, totals, eList, sList);
+    renderStage(session, totals, players);
   }
 
   async function refresh() {
