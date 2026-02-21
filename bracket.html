@@ -208,6 +208,27 @@
 
     .p { font-size: clamp(11px, 1.5vh, 16px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .vs { color: #93acdf; font-size: clamp(10px, 1.3vh, 14px); }
+
+    .player-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: .3rem;
+    }
+    .player-row span {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .remove-player-btn {
+      border-color: rgba(255, 122, 122, 0.75);
+      background: rgba(110, 24, 24, 0.88);
+      color: #ffdada;
+      padding: .08rem .4rem;
+      border-radius: 7px;
+      font-size: clamp(10px, 1.2vh, 12px);
+      line-height: 1.25;
+    }
     .winner-select {
       width: 100%;
       border: 1px solid rgba(151, 181, 255, .45);

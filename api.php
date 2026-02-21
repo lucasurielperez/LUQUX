@@ -2006,6 +2006,33 @@ try {
     ]);
   }
 
+  if ($method === 'POST' && $action === 'admin_luzverde_remove_participant') {
+    $active = luzverde_get_active_session($pdo);
+    if (!$active) {
+      fail('No hay sesión activa', 409, 'NO_ACTIVE_SESSION');
+    }
+
+    $b = body_json();
+    $playerId = (int) ($b['player_id'] ?? 0);
+    if ($playerId <= 0) {
+      fail('player_id inválido');
+    }
+
+    $sessionId = (int) $active['id'];
+    $del = $pdo->prepare('DELETE FROM luzverde_participants WHERE session_id = ? AND player_id = ?');
+    $del->execute([$sessionId, $playerId]);
+    if ($del->rowCount() <= 0) {
+      fail('Participante no encontrado', 404);
+    }
+
+    $alivePlayers = luzverde_get_alive_players($pdo, $sessionId);
+    if (count($alivePlayers) === 1 && $active['state'] !== 'FINISHED') {
+      luzverde_finish_session_with_winner($pdo, $active, $alivePlayers[0]);
+    }
+
+    ok(['removed' => true, 'player_id' => $playerId]);
+  }
+
   if ($method === 'POST' && $action === 'sumador_start') {
     $b = body_json();
     $mode = resolve_game_mode($b);

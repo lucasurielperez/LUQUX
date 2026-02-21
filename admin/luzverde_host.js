@@ -164,6 +164,7 @@
         <div><strong>${escapeHtml(p.display_name)}</strong></div>
         <div class="muted">${escapeHtml(p.public_code)}</div>
         <div class="muted">${playerLabel(p)}</div>
+        <button class="remove-player" data-remove-player="${p.player_id}">Sacar jugador</button>
       </div>
     `).join('');
 
@@ -175,6 +176,18 @@
 
     renderInformativeBanner(session, totals, eList, sList);
     renderStage(session, totals, players);
+  }
+
+  async function removeParticipant(playerId) {
+    if (!playerId) return;
+    const okRemove = window.confirm('¿Seguro que querés sacar este jugador de Luz Verde?');
+    if (!okRemove) return;
+    try {
+      await call('admin_luzverde_remove_participant', 'POST', { player_id: Number(playerId) });
+      await refresh();
+    } catch (err) {
+      setError(err.message);
+    }
   }
 
   async function refresh() {
@@ -211,6 +224,14 @@
   elSens.addEventListener('touchstart', () => { editingConfig = true; });
   elSens.addEventListener('mouseup', () => { editingConfig = false; });
   elSens.addEventListener('touchend', () => { editingConfig = false; });
+
+
+  document.body.addEventListener('click', (ev) => {
+    const btn = ev.target.closest('[data-remove-player]');
+    if (!btn) return;
+    const playerId = Number(btn.dataset.removePlayer || 0);
+    removeParticipant(playerId);
+  });
 
   setInterval(refresh, 1000);
   refresh();

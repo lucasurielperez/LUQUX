@@ -131,8 +131,11 @@
     currentState.bracket_applied_at = undefined;
   }
 
-  function buildTournamentState(playersRows) {
-    const players = shuffle(playersRows.slice()).map(function (p) {
+  function buildTournamentState(playersRows, shouldShuffle = true) {
+    const rows = playersRows.slice();
+    const orderedRows = shouldShuffle ? shuffle(rows) : rows;
+
+    const players = orderedRows.map(function (p) {
       return {
         player_id: Number(p.player_id),
         display_name: String(p.display_name || 'Jugador'),
@@ -372,6 +375,37 @@
     return p ? escapeHtml(p.display_name) : (fallback || '—');
   }
 
+
+  function renderRemovePlayerButton(playerId) {
+    if (!playerId) return '';
+    return `<button class="btn remove-player-btn" data-remove-player="${playerId}" title="Sacar del torneo">✖</button>`;
+  }
+
+  function removePlayerFromBracket(playerId) {
+    if (!state || !playerId) return;
+    const player = getPlayer(playerId);
+    if (!player) return;
+
+    const confirmMsg = `¿Sacar a ${player.display_name} del torneo?\n\nSe rearmará la llave con los jugadores restantes.`;
+    if (!window.confirm(confirmMsg)) {
+      return;
+    }
+
+    const remaining = state.players.filter(function (p) {
+      return p.player_id !== playerId;
+    });
+
+    if (remaining.length < 2) {
+      errorMsgEl.textContent = 'Se necesitan al menos 2 jugadores para mantener el bracket.';
+      return;
+    }
+
+    state = buildTournamentState(remaining, false);
+    errorMsgEl.textContent = `${player.display_name} fue removido del torneo.`;
+    saveState();
+    renderBracket();
+  }
+
   function matchCard(match, opts) {
     const p1 = getPlayer(match.player1_id);
     const p2 = getPlayer(match.player2_id);
@@ -381,13 +415,15 @@
 
     const luckyUi = getLuckyUiModel(match.round_index, match.match_index, match.player1_id, match.player2_id);
     const luckyBadgeP1 = luckyUi && luckyUi.oddPlayerId === match.player1_id ? '<span class="dup-badge">⚠ Ronda impar</span>' : '';
+    const removeP1 = renderRemovePlayerButton(match.player1_id);
     const luckyBadgeP2 = luckyUi && luckyUi.luckyLoserId === match.player2_id ? '<span class="dup-badge">Lucky Loser 🧟‍♂️</span>' : '';
+    const removeP2 = renderRemovePlayerButton(match.player2_id);
 
     return `
       <div class="match ${opts.compact ? 'compact' : ''}" style="margin-top:${opts.marginTopPx}px;">
-        <div class="p" title="${p1 ? escapeHtml(p1.display_name) : 'Sin definir'}">${p1 ? escapeHtml(p1.display_name) : '—'} ${luckyBadgeP1}</div>
+        <div class="p player-row" title="${p1 ? escapeHtml(p1.display_name) : 'Sin definir'}"><span>${p1 ? escapeHtml(p1.display_name) : '—'} ${luckyBadgeP1}</span>${removeP1}</div>
         <div class="vs">vs</div>
-        <div class="p" title="${p2 ? escapeHtml(p2.display_name) : 'Sin definir'}">${p2 ? escapeHtml(p2.display_name) : '—'} ${luckyBadgeP2}</div>
+        <div class="p player-row" title="${p2 ? escapeHtml(p2.display_name) : 'Sin definir'}"><span>${p2 ? escapeHtml(p2.display_name) : '—'} ${luckyBadgeP2}</span>${removeP2}</div>
         <select class="winner-select" data-round="${match.round_index}" data-match="${match.match_index}" ${(!canPick || editDisabled) ? 'disabled' : ''}>
           <option value="">Ganador…</option>
           ${p1 ? `<option value="${p1.player_id}" ${match.winner_id === p1.player_id ? 'selected' : ''}>${escapeHtml(p1.display_name)}</option>` : ''}
@@ -864,6 +900,13 @@
   }
 
   function bindEvents() {
+    document.body.addEventListener('click', function (ev) {
+      const btn = ev.target.closest('[data-remove-player]');
+      if (!btn) return;
+      const playerId = Number(btn.dataset.removePlayer || 0);
+      removePlayerFromBracket(playerId);
+    });
+
     document.body.addEventListener('change', function (ev) {
       const t = ev.target;
       if (!(t instanceof HTMLSelectElement)) return;
