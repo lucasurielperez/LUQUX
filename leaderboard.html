@@ -180,11 +180,60 @@
       from { transform: translateY(-10vh) rotate(0deg); }
       to { transform: translateY(110vh) rotate(540deg); }
     }
+
+
+    .photo-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 20;
+      background: rgba(4, 10, 28, .94);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 1.2vh;
+      padding: 2vh 2vw;
+    }
+    .photo-overlay.show { display: flex; }
+    .photo-overlay img {
+      max-width: 96vw;
+      max-height: 82vh;
+      border-radius: 18px;
+      object-fit: contain;
+      box-shadow: 0 10px 44px rgba(0, 0, 0, .55);
+      border: 2px solid rgba(148, 197, 255, .38);
+      background: rgba(2, 6, 23, .7);
+    }
+    .photo-caption {
+      font-size: clamp(19px, 2.7vh, 38px);
+      color: #dbeafe;
+      text-shadow: 0 0 18px rgba(125, 168, 255, .35);
+      font-weight: 800;
+    }
+    .admin-panel {
+      position: fixed;
+      right: 14px;
+      top: 14px;
+      width: min(360px, 92vw);
+      background: rgba(9, 18, 43, .95);
+      border: 1px solid rgba(151, 181, 255, .4);
+      border-radius: 14px;
+      padding: 12px;
+      z-index: 30;
+      display: none;
+      font-size: 14px;
+    }
+    .admin-panel.show { display: block; }
+    .admin-row { display:flex; align-items:center; justify-content:space-between; margin: 6px 0; gap: 8px; }
+    .admin-panel input[type="number"] { width: 120px; }
+    .admin-panel button { padding: 6px 10px; border-radius:8px; border:0; background:#3b82f6; color:white; font-weight:700; }
+    .admin-msg { min-height: 1.2em; color: #93c5fd; }
+
   </style>
 </head>
 <body>
   <div class="screen">
-    <h1 class="title">🏆 LEADERBOARD</h1>
+    <h1 class="title" id="lbTitle">🏆 LEADERBOARD</h1>
     <div class="sub">
       <span class="sub-main">Próxima actualización en: <span id="countdown">60</span>s<span id="updating" class="updating"></span></span>
       <select id="refreshSelect" class="refresh-select" aria-label="Intervalo de actualización">
@@ -225,6 +274,31 @@
       <div class="celebration-points" id="celebrationPoints">Puntaje: 0</div>
     </div>
   </div>
+
+
+
+  <div id="photoOverlay" class="photo-overlay" aria-hidden="true">
+    <img id="photoImg" alt="Foto en cola" />
+    <div id="photoCaption" class="photo-caption">📸 Foto</div>
+  </div>
+
+  <div id="photoAdminPanel" class="admin-panel" aria-hidden="true">
+    <strong>Foto settings</strong>
+    <div class="admin-row">
+      <label for="photosEnabledInput">Habilitado</label>
+      <input id="photosEnabledInput" type="checkbox" />
+    </div>
+    <div class="admin-row">
+      <label for="photoDurationInput">Duración (ms)</label>
+      <input id="photoDurationInput" type="number" min="2000" max="20000" step="500" />
+    </div>
+    <div class="admin-row">
+      <button id="photoAdminSaveBtn" type="button">Guardar</button>
+      <button id="photoAdminReloadBtn" type="button">Recargar</button>
+    </div>
+    <div id="photoAdminMsg" class="admin-msg"></div>
+  </div>
+
 
   <script src="leaderboard.js"></script>
 </body>

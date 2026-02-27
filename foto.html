@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="es-AR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Subir foto</title>
+  <style>
+    body { font-family: Inter, system-ui, Arial, sans-serif; background:#0f172a; color:#e2e8f0; margin:0; }
+    .wrap { max-width:560px; margin:0 auto; padding:24px 16px 48px; }
+    h1 { margin:0 0 14px; font-size:1.8rem; }
+    .card { background:#1e293b; border:1px solid #334155; border-radius:16px; padding:16px; }
+    .preview { margin-top:12px; width:100%; max-height:45vh; object-fit:contain; border-radius:12px; background:#020617; display:none; }
+    button { width:100%; margin-top:14px; padding:14px; border:0; border-radius:12px; background:#22c55e; color:#052e16; font-weight:800; font-size:1rem; }
+    button[disabled] { opacity:.55; }
+    #status { margin-top:14px; font-weight:700; min-height:1.5em; }
+    .error { color:#fca5a5; }
+    .ok { color:#86efac; }
+    .muted { color:#93c5fd; font-size:.95rem; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>📸 Foto en cola</h1>
+    <p id="enabledText" class="muted">Verificando estado...</p>
+    <div class="card">
+      <input id="photoInput" type="file" accept="image/*" capture="environment" />
+      <img id="preview" class="preview" alt="Vista previa" />
+      <button id="uploadBtn" type="button">Subir foto</button>
+      <div id="status"></div>
+    </div>
+  </div>
+
+  <script src="admin/player_context.js"></script>
+  <script src="foto.js"></script>
+</body>
+</html>
