@@ -76,6 +76,170 @@ function setting_set(PDO $pdo, string $key, string $value): void {
   $stmt->execute([$key, $value]);
 }
 
+function photo_settings(PDO $pdo): array {
+  $enabledRaw = setting_get($pdo, 'photos_enabled', '1');
+  $durationRaw = (int) setting_get($pdo, 'photos_duration_ms', '5000');
+  $durationMs = max(2000, min(20000, $durationRaw));
+
+  return [
+    'enabled' => $enabledRaw === '1',
+    'duration_ms' => $durationMs,
+  ];
+}
+
+function ensure_photo_upload_dir(): string {
+  $dir = __DIR__ . '/uploads/fotos';
+  if (!is_dir($dir)) {
+    mkdir($dir, 0775, true);
+  }
+
+  if (!is_dir($dir) || !is_writable($dir)) {
+    fail('No se pudo preparar uploads/fotos', 500, 'PHOTO_UPLOAD_DIR_ERROR');
+  }
+
+  return $dir;
+}
+
+function photos_public_base_url(): string {
+  $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+  $host = $_SERVER['HTTP_HOST'] ?? '';
+  if ($host === '') {
+    return '/uploads/fotos';
+  }
+
+  $scriptName = $_SERVER['SCRIPT_NAME'] ?? '/api.php';
+  $basePath = rtrim(str_replace('\\', '/', dirname($scriptName)), '/');
+  if ($basePath === '' || $basePath === '.') {
+    $basePath = '';
+  }
+
+  return $scheme . '://' . $host . $basePath . '/uploads/fotos';
+}
+
+function photo_build_public_url(string $fileName): string {
+  return photos_public_base_url() . '/' . rawurlencode($fileName);
+}
+
+function photo_decode_upload(array $file, string $mime): array {
+  $tmpPath = (string) ($file['tmp_name'] ?? '');
+  if ($tmpPath === '' || !is_uploaded_file($tmpPath)) {
+    fail('Archivo inválido', 422, 'PHOTO_INVALID_FILE');
+  }
+
+  if ($mime === 'image/jpeg') {
+    $im = @imagecreatefromjpeg($tmpPath);
+  } elseif ($mime === 'image/png') {
+    $im = @imagecreatefrompng($tmpPath);
+  } elseif ($mime === 'image/webp') {
+    $im = @imagecreatefromwebp($tmpPath);
+  } else {
+    fail('Formato inválido', 422, 'PHOTO_BAD_MIME');
+  }
+
+  if (!$im) {
+    fail('No se pudo leer la imagen', 422, 'PHOTO_DECODE_ERROR');
+  }
+
+  $width = imagesx($im);
+  $height = imagesy($im);
+  if ($width < 1 || $height < 1) {
+    imagedestroy($im);
+    fail('Dimensiones inválidas', 422, 'PHOTO_BAD_DIMENSIONS');
+  }
+
+  return [$im, $width, $height];
+}
+
+function photo_reencode_and_save(array $file): array {
+  $maxBytes = 3 * 1024 * 1024;
+  $size = (int) ($file['size'] ?? 0);
+  if ($size <= 0 || $size > $maxBytes) {
+    fail('Archivo muy pesado', 422, 'PHOTO_TOO_LARGE', ['max_bytes' => $maxBytes]);
+  }
+
+  $tmpPath = (string) ($file['tmp_name'] ?? '');
+  if ($tmpPath === '') {
+    fail('Archivo inválido', 422, 'PHOTO_INVALID_FILE');
+  }
+
+  $finfo = finfo_open(FILEINFO_MIME_TYPE);
+  $mime = $finfo ? (string) finfo_file($finfo, $tmpPath) : '';
+  if ($finfo) {
+    finfo_close($finfo);
+  }
+
+  $allowed = ['image/jpeg', 'image/png', 'image/webp'];
+  if (!in_array($mime, $allowed, true)) {
+    fail('Formato inválido', 422, 'PHOTO_BAD_MIME');
+  }
+
+  if (!function_exists('imagecreatetruecolor')) {
+    fail('GD no disponible en servidor', 500, 'PHOTO_GD_REQUIRED');
+  }
+
+  [$src, $srcW, $srcH] = photo_decode_upload($file, $mime);
+
+  $maxWidth = 1280;
+  $dstW = $srcW;
+  $dstH = $srcH;
+  if ($srcW > $maxWidth) {
+    $ratio = $maxWidth / $srcW;
+    $dstW = $maxWidth;
+    $dstH = max(1, (int) floor($srcH * $ratio));
+  }
+
+  $dst = imagecreatetruecolor($dstW, $dstH);
+  if (!$dst) {
+    imagedestroy($src);
+    fail('No se pudo procesar la imagen', 500, 'PHOTO_PROCESS_ERROR');
+  }
+
+  $white = imagecolorallocate($dst, 255, 255, 255);
+  imagefill($dst, 0, 0, $white);
+  imagecopyresampled($dst, $src, 0, 0, 0, 0, $dstW, $dstH, $srcW, $srcH);
+
+  $uploadDir = ensure_photo_upload_dir();
+  $fileName = date('Ymd_His') . '_' . bin2hex(random_bytes(8)) . '.jpg';
+  $destPath = $uploadDir . '/' . $fileName;
+
+  $saved = imagejpeg($dst, $destPath, 85);
+  imagedestroy($src);
+  imagedestroy($dst);
+
+  if (!$saved || !is_file($destPath)) {
+    fail('No se pudo guardar la imagen', 500, 'PHOTO_SAVE_ERROR');
+  }
+
+  return [
+    'file_name' => $fileName,
+    'file_path' => 'uploads/fotos/' . $fileName,
+    'public_url' => photo_build_public_url($fileName),
+    'stored_mime' => 'image/jpeg',
+  ];
+}
+
+function resolve_optional_photo_player(PDO $pdo, array $payload): array {
+  $playerId = isset($payload['player_id']) ? (int) $payload['player_id'] : 0;
+  if ($playerId > 0) {
+    $stmt = $pdo->prepare('SELECT id, display_name FROM players WHERE id = ? LIMIT 1');
+    $stmt->execute([$playerId]);
+    $row = $stmt->fetch();
+    if ($row) {
+      return [(int) $row['id'], (string) $row['display_name']];
+    }
+  }
+
+  $token = trim((string) ($payload['player_token'] ?? ''));
+  if ($token !== '' && strlen($token) >= 24) {
+    $player = find_player_by_token($pdo, $token);
+    if ($player) {
+      return [(int) $player['id'], (string) $player['display_name']];
+    }
+  }
+
+  return [null, null];
+}
+
 function player_exists(PDO $pdo, int $playerId): bool {
   $stmt = $pdo->prepare('SELECT id FROM players WHERE id = ? LIMIT 1');
   $stmt->execute([$playerId]);
@@ -832,6 +996,10 @@ $publicActions = [
   'luzverde_status',
   'luzverde_motion',
   'luzverde_heartbeat',
+  'photo_upload',
+  'photo_status',
+  'photo_peek_next',
+  'photo_mark_shown',
 ];
 
 if (!in_array($action, $publicActions, true) && !admin_is_authorized($config)) {
@@ -858,6 +1026,132 @@ get_or_create_luzverde_game($pdo);
 try {
   if ($method === 'GET' && $action === 'ping') {
     ok(['msg' => 'pong']);
+  }
+
+  if ($method === 'GET' && $action === 'photo_status') {
+    $settings = photo_settings($pdo);
+    $queueStmt = $pdo->query("SELECT COUNT(*) FROM photo_queue WHERE status = 'pending'");
+    $queueLen = (int) $queueStmt->fetchColumn();
+
+    ok([
+      'enabled' => $settings['enabled'],
+      'duration_ms' => $settings['duration_ms'],
+      'queue_len' => $queueLen,
+    ]);
+  }
+
+  if ($method === 'POST' && $action === 'photo_upload') {
+    $settings = photo_settings($pdo);
+    if (!$settings['enabled']) {
+      fail('Fotos deshabilitadas', 403, 'PHOTOS_DISABLED');
+    }
+
+    $file = $_FILES['photo'] ?? null;
+    if (!$file || !is_array($file)) {
+      fail('photo requerido', 422, 'PHOTO_REQUIRED');
+    }
+
+    if ((int) ($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+      fail('Error de subida', 422, 'PHOTO_UPLOAD_ERROR');
+    }
+
+    $stored = photo_reencode_and_save($file);
+    [$playerId, $displayName] = resolve_optional_photo_player($pdo, $_POST);
+
+    $ins = $pdo->prepare(
+      'INSERT INTO photo_queue (created_at, status, file_path, public_url, mime, player_id, display_name_snapshot)
+       VALUES (NOW(), ?, ?, ?, ?, ?, ?)'
+    );
+    $ins->execute([
+      'pending',
+      $stored['file_path'],
+      $stored['public_url'],
+      $stored['stored_mime'],
+      $playerId,
+      $displayName,
+    ]);
+
+    $queuedId = (int) $pdo->lastInsertId();
+    $posStmt = $pdo->prepare("SELECT COUNT(*) FROM photo_queue WHERE status = 'pending' AND id <= ?");
+    $posStmt->execute([$queuedId]);
+
+    ok([
+      'queued_id' => $queuedId,
+      'eta_position' => (int) $posStmt->fetchColumn(),
+    ]);
+  }
+
+  if ($method === 'GET' && $action === 'photo_peek_next') {
+    $settings = photo_settings($pdo);
+    if (!$settings['enabled']) {
+      ok(['has_photo' => false, 'enabled' => false]);
+    }
+
+    $stmt = $pdo->query(
+      "SELECT id, created_at, public_url, display_name_snapshot
+       FROM photo_queue
+       WHERE status = 'pending'
+       ORDER BY id ASC
+       LIMIT 1"
+    );
+    $row = $stmt->fetch();
+
+    if (!$row) {
+      ok(['has_photo' => false, 'enabled' => true]);
+    }
+
+    ok([
+      'has_photo' => true,
+      'enabled' => true,
+      'item' => [
+        'id' => (int) $row['id'],
+        'url' => (string) $row['public_url'],
+        'created_at' => (string) $row['created_at'],
+        'display_name' => $row['display_name_snapshot'] !== null ? (string) $row['display_name_snapshot'] : '',
+      ],
+    ]);
+  }
+
+  if ($method === 'POST' && $action === 'photo_mark_shown') {
+    $b = body_json();
+    $id = (int) ($b['id'] ?? 0);
+    if ($id <= 0) {
+      fail('id requerido', 422, 'PHOTO_ID_REQUIRED');
+    }
+
+    $stmt = $pdo->prepare(
+      "UPDATE photo_queue
+       SET status = 'shown', shown_at = NOW()
+       WHERE id = ? AND status = 'pending'"
+    );
+    $stmt->execute([$id]);
+
+    ok(['updated' => $stmt->rowCount()]);
+  }
+
+  if ($method === 'GET' && $action === 'admin_photos_settings_get') {
+    $settings = photo_settings($pdo);
+    ok($settings);
+  }
+
+  if ($method === 'POST' && $action === 'admin_photos_settings_set') {
+    $b = body_json();
+    $enabled = !empty($b['enabled']) ? '1' : '0';
+    $durationMs = (int) ($b['duration_ms'] ?? 5000);
+    $durationMs = max(2000, min(20000, $durationMs));
+
+    setting_set($pdo, 'photos_enabled', $enabled);
+    setting_set($pdo, 'photos_duration_ms', (string) $durationMs);
+
+    ok([
+      'enabled' => $enabled === '1',
+      'duration_ms' => $durationMs,
+    ]);
+  }
+
+  if ($method === 'POST' && $action === 'admin_photos_queue_clear') {
+    $stmt = $pdo->exec("DELETE FROM photo_queue WHERE status IN ('pending', 'shown', 'rejected')");
+    ok(['deleted' => (int) $stmt]);
   }
 
   if ($method === 'GET' && $action === 'public_leaderboard_top') {

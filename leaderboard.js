@@ -1,5 +1,6 @@
 (function () {
-  const API_URL = 'api.php?action=public_leaderboard_top';
+  const API_BASE = 'api.php';
+  const API_URL = `${API_BASE}?action=public_leaderboard_top`;
   const ALLOWED_REFRESH_MS = [1000, 5000, 10000, 30000, 60000];
 
   const lbBody = document.getElementById('lbBody');
@@ -13,12 +14,34 @@
   const celebrationNameEl = document.getElementById('celebrationName');
   const celebrationPointsEl = document.getElementById('celebrationPoints');
   const confettiLayer = document.getElementById('confettiLayer');
+  const photoOverlayEl = document.getElementById('photoOverlay');
+  const photoImgEl = document.getElementById('photoImg');
+  const photoCaptionEl = document.getElementById('photoCaption');
+  const titleEl = document.getElementById('lbTitle');
+
+  const photoAdminPanel = document.getElementById('photoAdminPanel');
+  const photosEnabledInput = document.getElementById('photosEnabledInput');
+  const photoDurationInput = document.getElementById('photoDurationInput');
+  const photoAdminSaveBtn = document.getElementById('photoAdminSaveBtn');
+  const photoAdminReloadBtn = document.getElementById('photoAdminReloadBtn');
+  const photoAdminMsg = document.getElementById('photoAdminMsg');
 
   let prevRanksByPlayerId = new Map();
   let refreshMs = Number(localStorage.getItem('lb_refresh_ms')) || 60000;
   if (!ALLOWED_REFRESH_MS.includes(refreshMs)) {
     refreshMs = 60000;
   }
+
+  let photosSettings = {
+    enabled: localStorage.getItem('photos_enabled') === '1',
+    duration_ms: Number(localStorage.getItem('photos_duration_ms')) || 5000,
+  };
+
+  const photoMode = {
+    showing: false,
+    until: 0,
+    lastCheckAt: 0,
+  };
 
   refreshSelect.value = String(refreshMs);
   if (refreshSelect.value !== String(refreshMs)) {
@@ -31,11 +54,61 @@
   let refreshTimer = null;
   let countdownTimer = null;
   let celebrationTimer = null;
+  let photoTimer = null;
+  let photoPollBusy = false;
+  let titleTapCount = 0;
+  let titleTapResetTimer = null;
 
-  const gameNames = {
-    sumador: 'Sumador',
-    virus: 'Virus',
-  };
+  const gameNames = { sumador: 'Sumador', virus: 'Virus' };
+
+  function setPhotoAdminMsg(msg, isError) {
+    if (!photoAdminMsg) return;
+    photoAdminMsg.textContent = msg;
+    photoAdminMsg.style.color = isError ? '#fca5a5' : '#93c5fd';
+  }
+
+  function getAdminToken() {
+    let token = localStorage.getItem('admin_token') || '';
+    if (!token) {
+      token = window.prompt('Ingresá admin token') || '';
+      if (token) {
+        localStorage.setItem('admin_token', token);
+      }
+    }
+    return token.trim();
+  }
+
+  async function adminCall(action, payload) {
+    const token = getAdminToken();
+    if (!token) {
+      throw new Error('Token admin requerido');
+    }
+
+    const hasPayload = payload !== undefined;
+    const url = `${API_BASE}?action=${encodeURIComponent(action)}`;
+    const res = await fetch(url, {
+      method: hasPayload ? 'POST' : 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: hasPayload ? JSON.stringify(payload) : undefined,
+    });
+    const data = await res.json().catch(function () { return {}; });
+    if (!res.ok || !data.ok) {
+      throw new Error(data.error || `HTTP ${res.status}`);
+    }
+    return data;
+  }
+
+  async function fetchJson(action, options) {
+    const res = await fetch(`${API_BASE}?action=${encodeURIComponent(action)}`, options || { cache: 'no-store' });
+    const data = await res.json().catch(function () { return {}; });
+    if (!res.ok || !data.ok) {
+      throw new Error(data.error || `HTTP ${res.status}`);
+    }
+    return data;
+  }
 
   function formatPointsDelta(delta) {
     if (typeof delta !== 'number' || Number.isNaN(delta)) return '';
@@ -56,13 +129,8 @@
       return `QR de ${qrPoints} puntos.`;
     }
 
-    if (!deltaText && !note) {
-      return gameName;
-    }
-
-    if (!note) {
-      return `${gameName} ${deltaText}`.trim();
-    }
+    if (!deltaText && !note) return gameName;
+    if (!note) return `${gameName} ${deltaText}`.trim();
 
     return `${gameName} ${deltaText}`.trim() + ` <span class="note">(${escapeHtml(note)})</span>`;
   }
@@ -78,10 +146,8 @@
 
   function arrowForPlayer(playerId, position) {
     if (!prevRanksByPlayerId.size) return '🔵 =';
-
     const prevPos = prevRanksByPlayerId.get(playerId);
     if (typeof prevPos !== 'number') return '🔵 =';
-
     if (position < prevPos) return '🟢 ↑';
     if (position > prevPos) return '🔴 ↓';
     return '🔵 =';
@@ -108,6 +174,13 @@
   }
 
   function updateCountdown() {
+    if (photoMode.showing) {
+      const remainingPhoto = Math.max(0, photoMode.until - Date.now());
+      countdownEl.textContent = String(Math.ceil(remainingPhoto / 1000));
+      updatingEl.textContent = ' · Pausado por foto';
+      return;
+    }
+
     const remaining = Math.max(0, nextRefreshAt - Date.now());
     countdownEl.textContent = String(Math.ceil(remaining / 1000));
   }
@@ -151,7 +224,6 @@
   function launchConfetti() {
     confettiLayer.innerHTML = '';
     const colors = ['#ffd266', '#86ffb5', '#7ab0ff', '#ff7fbf', '#ffeaa6'];
-
     for (let i = 0; i < 85; i += 1) {
       const piece = document.createElement('span');
       piece.className = 'confetti-piece';
@@ -164,7 +236,7 @@
   }
 
   function showCelebration(candidate) {
-    if (!candidate) return;
+    if (!candidate || photoMode.showing) return;
 
     celebrationTopEl.textContent = `🔥 SUBIÓ AL #${candidate.newPos}`;
     celebrationNameEl.textContent = candidate.display_name;
@@ -187,15 +259,13 @@
   }
 
   async function refreshLeaderboard() {
+    if (photoMode.showing) {
+      return;
+    }
+
     updatingEl.textContent = ' · Actualizando…';
-
     try {
-      const res = await fetch(API_URL, { cache: 'no-store' });
-      const data = await res.json().catch(function () { return {}; });
-      if (!res.ok || !data.ok) {
-        throw new Error(data.error || `HTTP ${res.status}`);
-      }
-
+      const data = await fetchJson('public_leaderboard_top', { cache: 'no-store' });
       const rows = Array.isArray(data.rows) ? data.rows.slice(0, 15) : [];
       const celebrationCandidate = detectCelebration(rows);
 
@@ -211,22 +281,138 @@
       errorMsgEl.textContent = 'Sin conexión / Error actualizando';
       errorMsgEl.classList.add('error');
     } finally {
-      updatingEl.textContent = '';
+      if (!photoMode.showing) {
+        updatingEl.textContent = '';
+      }
       nextRefreshAt = Date.now() + refreshMs;
       updateCountdown();
     }
   }
 
-  function startRefreshTimer() {
+  function stopRefreshTimer() {
     if (refreshTimer) {
       clearInterval(refreshTimer);
+      refreshTimer = null;
     }
+  }
 
+  function startRefreshTimer() {
+    stopRefreshTimer();
     nextRefreshAt = Date.now() + refreshMs;
     updateCountdown();
     refreshTimer = setInterval(function () {
       refreshLeaderboard();
     }, refreshMs);
+  }
+
+  async function fetchPhotoSettings() {
+    try {
+      const data = await fetchJson('photo_status', { cache: 'no-store' });
+      photosSettings = {
+        enabled: !!data.enabled,
+        duration_ms: Number(data.duration_ms || photosSettings.duration_ms || 5000),
+      };
+      localStorage.setItem('photos_enabled', photosSettings.enabled ? '1' : '0');
+      localStorage.setItem('photos_duration_ms', String(photosSettings.duration_ms));
+    } catch (err) {
+      // silencioso
+    }
+  }
+
+  async function markPhotoShown(id) {
+    try {
+      await fetchJson('photo_mark_shown', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      });
+    } catch (err) {
+      // silencioso
+    }
+  }
+
+  function showPhotoOverlay(item) {
+    photoMode.showing = true;
+    photoMode.until = Date.now() + Number(photosSettings.duration_ms || 5000);
+    photoImgEl.src = `${item.url}${item.url.includes('?') ? '&' : '?'}v=${item.id}`;
+    const displayName = String(item.display_name || '').trim();
+    photoCaptionEl.textContent = displayName ? `📸 Foto de ${displayName}` : '📸 Foto en pantalla';
+    photoOverlayEl.classList.add('show');
+    celebrationEl.classList.remove('show');
+    stopRefreshTimer();
+    updateCountdown();
+
+    window.setTimeout(async function () {
+      photoOverlayEl.classList.remove('show');
+      photoImgEl.src = '';
+      photoMode.showing = false;
+      updatingEl.textContent = '';
+      startRefreshTimer();
+      await refreshLeaderboard();
+    }, Number(photosSettings.duration_ms || 5000));
+  }
+
+  async function checkPhotoQueue() {
+    if (photoPollBusy || photoMode.showing) {
+      return;
+    }
+
+    photoPollBusy = true;
+    photoMode.lastCheckAt = Date.now();
+    try {
+      const data = await fetchJson('photo_peek_next', { cache: 'no-store' });
+      if (!data.enabled) {
+        photosSettings.enabled = false;
+        return;
+      }
+
+      if (!data.has_photo || !data.item || !photosSettings.enabled) {
+        return;
+      }
+
+      await markPhotoShown(Number(data.item.id));
+      showPhotoOverlay(data.item);
+    } catch (err) {
+      // silencioso
+      console.debug('photo_peek_next error', err);
+    } finally {
+      photoPollBusy = false;
+    }
+  }
+
+  async function loadAdminPhotoSettings() {
+    try {
+      const data = await adminCall('admin_photos_settings_get');
+      photosEnabledInput.checked = !!data.enabled;
+      photoDurationInput.value = String(Number(data.duration_ms || 5000));
+      setPhotoAdminMsg('Settings cargados');
+    } catch (err) {
+      setPhotoAdminMsg(String(err.message || err), true);
+    }
+  }
+
+  async function saveAdminPhotoSettings() {
+    try {
+      const payload = {
+        enabled: !!photosEnabledInput.checked,
+        duration_ms: Number(photoDurationInput.value || 5000),
+      };
+      const data = await adminCall('admin_photos_settings_set', payload);
+      photosSettings.enabled = !!data.enabled;
+      photosSettings.duration_ms = Number(data.duration_ms || 5000);
+      localStorage.setItem('photos_enabled', photosSettings.enabled ? '1' : '0');
+      localStorage.setItem('photos_duration_ms', String(photosSettings.duration_ms));
+      setPhotoAdminMsg('Guardado OK');
+    } catch (err) {
+      setPhotoAdminMsg(String(err.message || err), true);
+    }
+  }
+
+  function toggleAdminPanel() {
+    photoAdminPanel.classList.toggle('show');
+    if (photoAdminPanel.classList.contains('show')) {
+      loadAdminPhotoSettings();
+    }
   }
 
   refreshSelect.addEventListener('change', function () {
@@ -237,6 +423,31 @@
     startRefreshTimer();
     refreshLeaderboard();
   });
+
+  if (titleEl) {
+    titleEl.addEventListener('click', function () {
+      titleTapCount += 1;
+      clearTimeout(titleTapResetTimer);
+      titleTapResetTimer = setTimeout(function () { titleTapCount = 0; }, 700);
+      if (titleTapCount >= 3) {
+        titleTapCount = 0;
+        toggleAdminPanel();
+      }
+    });
+  }
+
+  document.addEventListener('keydown', function (ev) {
+    if (ev.key && ev.key.toLowerCase() === 'a') {
+      toggleAdminPanel();
+    }
+  });
+
+  if (photoAdminSaveBtn) {
+    photoAdminSaveBtn.addEventListener('click', saveAdminPhotoSettings);
+  }
+  if (photoAdminReloadBtn) {
+    photoAdminReloadBtn.addEventListener('click', loadAdminPhotoSettings);
+  }
 
   document.addEventListener('dblclick', function (ev) {
     ev.preventDefault();
@@ -253,7 +464,9 @@
   window.addEventListener('beforeunload', function () {
     clearInterval(refreshTimer);
     clearInterval(countdownTimer);
+    clearInterval(photoTimer);
     clearTimeout(celebrationTimer);
+    clearTimeout(titleTapResetTimer);
   });
 
   startRefreshTimer();
@@ -261,5 +474,8 @@
     updateCountdown();
     updateLastOkText();
   }, 250);
+  photoTimer = setInterval(checkPhotoQueue, 1500);
+
+  fetchPhotoSettings();
   refreshLeaderboard();
 })();
