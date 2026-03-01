@@ -7,6 +7,12 @@
   const elSensVal = $('sensVal');
   const elBase = $('basePoints');
   const elRest = $('restSeconds');
+  const elDiffStep = $('difficultyStep');
+  const elDiffCap = $('difficultyCap');
+  const elRoundMaxMs = $('roundMaxMs');
+  const elStillWindowMs = $('stillWindowMs');
+  const elStillMin = $('stillMin');
+  const elStillGraceMs = $('stillGraceMs');
   const sound = $('sound');
   let editingConfig = false;
 
@@ -36,7 +42,13 @@
 
   function updateConfigBody() {
     return {
-      sensitivity_level: Number(elSens.value || 15),
+      base_sensitivity: Number(elSens.value || 15),
+      difficulty_step: Number(elDiffStep.value || 2),
+      difficulty_cap: Number(elDiffCap.value || 40),
+      round_max_ms: Number(elRoundMaxMs.value || 25000),
+      still_window_ms: Number(elStillWindowMs.value || 6000),
+      still_min: Number(elStillMin.value || 0.015),
+      still_grace_ms: Number(elStillGraceMs.value || 2000),
       base_points: Number(elBase.value || 10),
       rest_seconds: Number(elRest.value || 60),
     };
@@ -46,6 +58,7 @@
     if (!p.armed) return 'No listo';
     if (!p.eliminated_at) return 'Vivo';
     if (p.eliminated_reason === 'SENSOR_OFFLINE') return 'Eliminado (OFFLINE)';
+    if (p.eliminated_reason === 'TOO_STILL') return 'DEMASIADO QUIETO';
     return 'Eliminado (MOTION)';
   }
 
@@ -116,7 +129,7 @@
       const winners = sList.length ? sList.map((p) => p.display_name).join(', ') : 'Nadie';
       const losers = eList.length ? eList.map((p) => p.display_name).join(', ') : 'Nadie';
       statusMessage.textContent = `Ronda ${session.round_no} terminada. Ganaron: ${winners}.`;
-      waitingDetail.textContent = `Perdieron: ${losers}. Preparando próxima ronda...`;
+      waitingDetail.textContent = `Perdieron: ${losers}. Ronda ${session.round_no} terminada. Próxima más difícil 😈`;
       return;
     }
 
@@ -140,14 +153,27 @@
     $('total').textContent = totals.total;
     $('notReady').textContent = totals.not_ready || 0;
     $('round').textContent = session?.round_no || 0;
+    $('currentSensitivity').textContent = session?.current_sensitivity || session?.sensitivity_level || 0;
 
     if (session) {
       if (!editingConfig) {
-        elSens.value = session.sensitivity_level;
-        elSensVal.textContent = session.sensitivity_level;
+        elSens.value = session.base_sensitivity || session.sensitivity_level;
+        elSensVal.textContent = elSens.value;
       }
+      elDiffStep.value = session.difficulty_step ?? 2;
+      elDiffCap.value = session.difficulty_cap ?? 40;
+      elRoundMaxMs.value = session.round_max_ms ?? 25000;
+      elStillWindowMs.value = session.still_window_ms ?? 6000;
+      elStillMin.value = session.still_min ?? 0.015;
+      elStillGraceMs.value = session.still_grace_ms ?? 2000;
       elBase.value = session.base_points;
       elRest.value = session.rest_seconds;
+
+      if (session.state === 'ACTIVE') {
+        $('roundTimer').textContent = `${Math.max(0, Math.ceil((session.round_time_left_ms || 0) / 1000))}s`;
+      } else {
+        $('roundTimer').textContent = '--';
+      }
 
       if (session.state === 'REST' && session.rest_ends_at) {
         const endAt = new Date(session.rest_ends_at.replace(' ', 'T')).getTime();
@@ -156,6 +182,9 @@
       } else {
         $('countdown').textContent = '--';
       }
+    } else {
+      $('roundTimer').textContent = '--';
+      $('currentSensitivity').textContent = '0';
     }
 
     const players = Array.isArray(data.participants) ? data.participants : [];
