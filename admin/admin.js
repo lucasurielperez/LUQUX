@@ -207,6 +207,24 @@ async function loadGames() {
   });
 }
 
+function setupSectionJump() {
+  const sectionJump = el('sectionJump');
+  if (!sectionJump) return;
+
+  const sections = Array.from(document.querySelectorAll('.card[id][data-title]'));
+  sectionJump.innerHTML = `<option value="">Seleccionar…</option>${sections.map((section) => (
+    `<option value="${esc(section.id)}">${esc(section.dataset.title || section.id)}</option>`
+  )).join('')}`;
+
+  sectionJump.onchange = () => {
+    const sectionId = sectionJump.value;
+    if (!sectionId) return;
+    const target = document.getElementById(sectionId);
+    if (!target) return;
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+}
+
 async function loadPlayers() {
   const { rows } = await call('players');
   const items = rowsOrEmpty(rows);
@@ -311,6 +329,7 @@ async function loadLeaderboard() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  setupSectionJump();
   el('token').value = token();
 
   el('saveToken').onclick = () => {
