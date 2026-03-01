@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="es-AR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Host Muévete Luz Roja</title>
+  <style>
+    :root{color-scheme:dark}
+    *{box-sizing:border-box}
+    body{margin:0;font-family:system-ui,Arial;background:#0f172a;color:#e2e8f0}
+    .wrap{padding:14px}
+    h1{font-size:clamp(36px,6vw,72px);margin:0 0 12px}
+    .panel,.card{background:#111827;border:1px solid #334155;border-radius:12px;padding:12px;margin-bottom:12px}
+    .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    input,button,select{padding:10px;border-radius:8px;border:1px solid #334155;background:#0f172a;color:#e2e8f0}
+    button{cursor:pointer;background:#22c55e;color:#052e16;border:0;font-weight:700}
+    button.secondary{background:#334155;color:#e2e8f0}
+    .stats{display:flex;gap:10px;flex-wrap:wrap}
+    .stat{background:#1e293b;border-radius:10px;padding:10px;min-width:120px;text-align:center}
+    .big{font-size:32px;font-weight:800}
+    #playersGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px}
+    .p{position:relative;background:#1e293b;border:1px solid #334155;border-radius:10px;padding:10px;min-height:82px;overflow:hidden}
+    .remove-player{margin-top:8px;padding:6px 8px;border-radius:8px;background:#b91c1c;color:#fee2e2;border:0;font-weight:700;cursor:pointer}
+    .dead{background:#7f1d1d;border-color:#ef4444}
+    .dead::after{content:'✖';position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:66px;color:#fecaca;background:rgba(127,29,29,.45)}
+    .err{color:#fca5a5;font-weight:700}
+    .muted{opacity:.8}
+    .lists{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .statusMessage{font-size:20px;font-weight:700;color:#bfdbfe;margin-top:8px}
+    .waitingDetail{margin-top:8px;color:#cbd5e1}
+
+    .stage{display:none;min-height:100vh;padding:16px;background:
+      radial-gradient(circle at 30% 0%, rgba(34,197,94,.24), transparent 45%),
+      radial-gradient(circle at 100% 100%, rgba(239,68,68,.24), transparent 46%),
+      #020617}
+    body.playing .wrap{display:none}
+    body.playing .stage{display:flex;flex-direction:column;gap:12px}
+    .stageTop{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:8px 14px;background:rgba(15,23,42,.8);border:1px solid #334155;border-radius:12px}
+    .stageTitle{font-size:clamp(26px,4vw,46px);font-weight:900;color:#bbf7d0;letter-spacing:.04em}
+    .stageMeta{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+    .pill{background:#1e293b;border:1px solid #334155;border-radius:999px;padding:6px 12px;font-weight:700}
+    .pill.warn{background:#7f1d1d;border-color:#f87171}
+    .stageGrid{
+      flex:1;
+      display:grid;
+      grid-template-columns:repeat(var(--stage-cols,6), minmax(0, 1fr));
+      gap:8px;
+      align-content:stretch;
+      overflow:hidden;
+    }
+    .stageCard{position:relative;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;padding:8px;border-radius:12px;border:1px solid #334155;background:linear-gradient(180deg,#1e293b,#0f172a);min-height:0;animation:cardIn .25s ease}
+    .stageCard .name{font-weight:800;font-size:clamp(12px,1.5vw,20px);line-height:1.12}
+    .stageCard .code{opacity:.82;font-size:clamp(10px,1vw,15px)}
+    .stageCard .state{font-size:clamp(10px,.95vw,14px);margin-top:3px;color:#a7f3d0}
+    .stageCard.notReady{background:linear-gradient(180deg,#374151,#111827)}
+    .stageCard.dead{background:linear-gradient(180deg,#7f1d1d,#3f0a0a);border-color:#f87171;animation:explode .5s ease both}
+    .stageCard.dead .state{color:#fecaca;font-weight:800}
+    .stageCard.dead::after{content:'✖';position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:clamp(24px,4vw,72px);font-weight:900;color:#fee2e2;background:radial-gradient(circle,rgba(255,180,180,.3),rgba(127,29,29,.08) 55%, transparent 70%);mix-blend-mode:screen}
+    .stageFooter{text-align:center;font-size:clamp(18px,2.2vw,30px);font-weight:800;color:#e2e8f0;text-shadow:0 0 18px rgba(96,165,250,.35)}
+
+    @keyframes explode {
+      0%{transform:scale(.72) rotate(-7deg);filter:brightness(2);box-shadow:0 0 0 rgba(248,113,113,.9)}
+      45%{transform:scale(1.08) rotate(3deg);box-shadow:0 0 34px rgba(248,113,113,.95)}
+      100%{transform:scale(1) rotate(0);filter:brightness(1)}
+    }
+    @keyframes cardIn {from{transform:scale(.95);opacity:.3}to{transform:scale(1);opacity:1}}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>MUÉVETE LUZ ROJA</h1>
+    <div class="panel">
+      <div class="row">
+        <label>Umbral base mínimo
+          <input id="sensitivity" type="number" min="0.2" max="10" step="0.1" value="1.2" style="width:90px" />
+          <span id="sensVal">1.2</span>
+        </label>
+        <label>Step dificultad <input id="difficultyStep" type="number" min="0" max="5" step="0.1" value="0.3" style="width:90px"></label>
+        <label>Cap dificultad <input id="difficultyCap" type="number" min="0.2" max="20" step="0.1" value="6" style="width:90px"></label>
+        <label>Ronda máx (ms) <input id="roundMaxMs" type="number" min="5000" value="25000" style="width:120px"></label>
+        <label>Ventana de quietud (ms) <input id="stillWindowMs" type="number" min="1200" value="1500" style="width:120px"></label>
+        <label>Puntos base <input id="basePoints" type="number" min="1" value="10" style="width:110px"></label>
+        <label>Descanso (s) <input id="restSeconds" type="number" min="5" value="60" style="width:110px"></label>
+        <button id="btnUpdate">Guardar config</button>
+        <button id="btnReset">Crear / Reiniciar sesión</button>
+        <button id="btnStart">Iniciar ronda</button>
+        <button id="btnEnd" class="secondary">Terminar ronda (manual)</button>
+        <button id="btnFinish" class="secondary">Finalizar juego</button>
+        <button id="btnSound" class="secondary">Probar sonido</button>
+      </div>
+      <div id="error" class="err"></div>
+      <div id="statusMessage" class="statusMessage"></div>
+      <div id="waitingDetail" class="waitingDetail"></div>
+    </div>
+
+    <div class="card">
+      <div class="stats">
+        <div class="stat"><div class="muted">Estado</div><div id="state" class="big">WAITING</div></div>
+        <div class="stat"><div class="muted">Vivos</div><div id="alive" class="big">0</div></div>
+        <div class="stat"><div class="muted">Eliminados</div><div id="eliminated" class="big">0</div></div>
+        <div class="stat"><div class="muted">Total</div><div id="total" class="big">0</div></div>
+        <div class="stat"><div class="muted">No listos</div><div id="notReady" class="big">0</div></div>
+        <div class="stat"><div class="muted">Ronda</div><div id="round" class="big">0</div></div>
+        <div class="stat"><div class="muted">Umbral actual</div><div id="currentSensitivity" class="big">0</div></div>
+        <div class="stat"><div class="muted">Tiempo ronda</div><div id="roundTimer" class="big">--</div></div>
+        <div class="stat"><div class="muted">Descanso</div><div id="countdown" class="big">--</div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div id="playersGrid"></div>
+    </div>
+
+    <div class="lists">
+      <div class="card"><h3>Eliminados de esta ronda</h3><ul id="elims"></ul></div>
+      <div class="card"><h3>Pasan a la siguiente</h3><ul id="survivors"></ul></div>
+    </div>
+  </div>
+
+  <section class="stage">
+    <div class="stageTop">
+      <div class="stageTitle">¡LUZ ROJA EN CURSO!</div>
+      <div class="stageMeta">
+        <div class="pill">Ronda <span id="stageRound">0</span></div>
+        <div class="pill">Jugando: <span id="stageAlive">0</span></div>
+        <div class="pill warn">Eliminados: <span id="stageEliminated">0</span></div>
+      </div>
+    </div>
+    <div id="stageGrid" class="stageGrid"></div>
+    <div id="stageFooter" class="stageFooter">¡No te quedes quieto!</div>
+  </section>
+
+  <audio id="sound" preload="none" src="../assets/luzroja.mp3"></audio>
+  <script src="luzroja_host.js"></script>
+</body>
+</html>
