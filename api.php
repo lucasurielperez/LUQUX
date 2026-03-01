@@ -586,201 +586,6 @@ function luzverde_threshold_for_level(int $level): float {
   return $maxThreshold - (($level - 1) * (($maxThreshold - $minThreshold) / 39));
 }
 
-function luzverde_round_time_left_ms(array $session, ?int $nowMs = null): int {
-  $state = (string) ($session['state'] ?? 'WAITING');
-  if ($state !== 'ACTIVE') {
-    return 0;
-  }
-
-  $roundMaxMs = max(1000, (int) ($session['round_max_ms'] ?? 25000));
-  $startedAtRaw = (string) ($session['round_started_at'] ?? '');
-  if ($startedAtRaw === '') {
-    return $roundMaxMs;
-  }
-
-  $startedAtSec = strtotime($startedAtRaw);
-  if ($startedAtSec === false) {
-    return $roundMaxMs;
-  }
-
-  $startedAtMs = ((int) $startedAtSec) * 1000;
-  $nowMs = $nowMs ?? ((int) round(microtime(true) * 1000));
-  return max(0, $roundMaxMs - ($nowMs - $startedAtMs));
-}
-
-function luzverde_current_sensitivity(array $session): int {
-  $base = max(1, min(40, (int) ($session['base_sensitivity'] ?? ($session['sensitivity_level'] ?? 15))));
-  $step = max(0, min(10, (int) ($session['difficulty_step'] ?? 2)));
-  $cap = max($base, min(40, (int) ($session['difficulty_cap'] ?? 40)));
-  $roundNo = max(1, (int) ($session['round_no'] ?? 1));
-
-  return min($base + (($roundNo - 1) * $step), $cap);
-}
-
-function luzverde_effective_threshold(array $session, array $participant): float {
-  $sensitivity = luzverde_current_sensitivity($session);
-  $threshold = luzverde_threshold_for_level($sensitivity);
-  $multiplier = (float) ($participant['device_multiplier'] ?? 1.0);
-  $multiplier = max(0.85, min(1.15, $multiplier));
-  return $threshold * $multiplier;
-}
-
-function luzverde_player_danger_level(array $session, ?array $me): float {
-  if (!$me || $me['eliminated_at'] !== null || (int) ($me['armed'] ?? 0) !== 1) {
-    return 0.0;
-  }
-
-  $threshold = luzverde_effective_threshold($session, $me);
-  if ($threshold <= 0) {
-    return 0.0;
-  }
-
-  $lastMotionScore = (float) ($me['last_motion_score'] ?? 0.0);
-  return max(0.0, min(1.0, $lastMotionScore / $threshold));
-}
-
-function luzverde_apply_round_end(PDO $pdo, array $sessionLocked): bool {
-  if ((string) ($sessionLocked['state'] ?? 'WAITING') !== 'ACTIVE') {
-    return false;
-  }
-
-  $update = $pdo->prepare(
-    "UPDATE luzverde_sessions
-     SET state = 'REST', round_started_at = NULL, rest_ends_at = DATE_ADD(NOW(), INTERVAL rest_seconds SECOND), updated_at = NOW()
-     WHERE id = ?"
-  );
-  $update->execute([(int) $sessionLocked['id']]);
-
-  return true;
-}
-
-function luzverde_maybe_auto_end_round(PDO $pdo, int $sessionId): bool {
-  $lockStmt = $pdo->prepare('SELECT * FROM luzverde_sessions WHERE id = ? LIMIT 1 FOR UPDATE');
-  $lockStmt->execute([$sessionId]);
-  $session = $lockStmt->fetch();
-  if (!$session || (string) $session['state'] !== 'ACTIVE') {
-    return false;
-  }
-
-  if (luzverde_round_time_left_ms($session) > 0) {
-    return false;
-  }
-
-  return luzverde_apply_round_end($pdo, $session);
-}
-
-function luzverde_update_participant_stillness(PDO $pdo, array $session, array $participant, float $motionScore): array {
-  $response = [
-    'still_seconds' => 0,
-    'eliminated' => false,
-    'reason' => null,
-  ];
-
-  if ((string) ($session['state'] ?? 'WAITING') !== 'ACTIVE') {
-    return $response;
-  }
-  if ($participant['eliminated_at'] !== null || (int) ($participant['armed'] ?? 0) !== 1) {
-    return $response;
-  }
-
-  $stillMin = max(0.0001, (float) ($session['still_min'] ?? 0.015));
-  $stillWindowMs = max(2000, min(20000, (int) ($session['still_window_ms'] ?? 6000)));
-  $stillGraceMs = max(0, min(10000, (int) ($session['still_grace_ms'] ?? 2000)));
-
-  $roundStartedAt = strtotime((string) ($session['round_started_at'] ?? ''));
-  if ($roundStartedAt !== false) {
-    $roundAgeMs = (((int) time()) - ((int) $roundStartedAt)) * 1000;
-    if ($roundAgeMs < $stillGraceMs) {
-      return $response;
-    }
-  }
-
-  $isStill = $motionScore < $stillMin;
-  $stillSince = $participant['still_since_at'];
-  if ($isStill && !$stillSince) {
-    $upd = $pdo->prepare('UPDATE luzverde_participants SET still_since_at = NOW() WHERE id = ?');
-    $upd->execute([(int) $participant['id']]);
-    return $response;
-  }
-
-  if (!$isStill) {
-    if ($stillSince) {
-      $upd = $pdo->prepare('UPDATE luzverde_participants SET still_since_at = NULL WHERE id = ?');
-      $upd->execute([(int) $participant['id']]);
-    }
-    return $response;
-  }
-
-  $stillSinceTs = strtotime((string) $stillSince);
-  if ($stillSinceTs === false) {
-    return $response;
-  }
-
-  $stillMs = ((((int) time()) - ((int) $stillSinceTs)) * 1000);
-  $response['still_seconds'] = (int) floor($stillMs / 1000);
-
-  if ($stillMs < $stillWindowMs) {
-    return $response;
-  }
-
-  luzverde_eliminate_participant($pdo, (int) $session['id'], (int) $participant['id'], (int) $session['round_no'], 'TOO_STILL', $motionScore);
-  $response['eliminated'] = true;
-  $response['reason'] = 'TOO_STILL';
-  return $response;
-}
-
-function luzverde_calibration_update(PDO $pdo, array $session, array $participant, float $motionScore): void {
-  if ($participant['eliminated_at'] !== null || (int) ($participant['armed'] ?? 0) !== 1) {
-    return;
-  }
-
-  $calibrationMs = 2000;
-  $roundStartedAt = strtotime((string) ($session['round_started_at'] ?? ''));
-  if ($roundStartedAt === false) {
-    return;
-  }
-
-  $ageMs = ((((int) time()) - ((int) $roundStartedAt)) * 1000);
-  if ($ageMs < 0 || $ageMs > $calibrationMs) {
-    return;
-  }
-
-  $count = max(0, (int) ($participant['calibration_samples'] ?? 0));
-  $sum = (float) ($participant['calibration_sum'] ?? 0.0);
-  $sumSq = (float) ($participant['calibration_sum_sq'] ?? 0.0);
-  $count++;
-  $sum += $motionScore;
-  $sumSq += ($motionScore * $motionScore);
-
-  $mean = $sum / max(1, $count);
-  $variance = max(0.0, ($sumSq / max(1, $count)) - ($mean * $mean));
-  $stddev = sqrt($variance);
-
-  $multiplier = 1.0;
-  if ($stddev <= 0.0001) {
-    $multiplier = 0.85;
-  } else {
-    $targetStddev = 0.03;
-    $multiplier = max(0.85, min(1.15, $stddev / $targetStddev));
-  }
-
-  $upd = $pdo->prepare(
-    'UPDATE luzverde_participants
-     SET calibration_samples = ?, calibration_sum = ?, calibration_sum_sq = ?,
-         calibration_stddev = ?, calibration_valid = ?, device_multiplier = ?
-     WHERE id = ?'
-  );
-  $upd->execute([
-    $count,
-    $sum,
-    $sumSq,
-    $stddev,
-    $stddev > 0.0001 ? 1 : 0,
-    $multiplier,
-    (int) $participant['id'],
-  ]);
-}
-
 function luzverde_offline_timeout_seconds(): float {
   return 2.5;
 }
@@ -826,7 +631,8 @@ function luzverde_apply_round_threshold(PDO $pdo, array $sessionLocked): bool {
   $updateSessionSql = 'UPDATE luzverde_sessions SET round_eliminated_count = ?, updated_at = NOW()';
   $params = [$roundEliminated];
   if ($shouldRest) {
-    $updateSessionSql .= ", state = 'REST', round_started_at = NULL, rest_ends_at = DATE_ADD(NOW(), INTERVAL rest_seconds SECOND)";
+    $updateSessionSql .= ', state = ?, rest_ends_at = DATE_ADD(NOW(), INTERVAL rest_seconds SECOND)';
+    $params[] = 'REST';
   }
   $updateSessionSql .= ' WHERE id = ?';
   $params[] = (int) $sessionLocked['id'];
@@ -906,7 +712,7 @@ function luzverde_finish_session_with_winner(PDO $pdo, array $session, array $wi
 
   $update = $pdo->prepare(
     "UPDATE luzverde_sessions
-     SET state = 'FINISHED', round_started_at = NULL, round_eliminated_count = 0, rest_ends_at = NULL, updated_at = NOW()
+     SET state = 'FINISHED', round_eliminated_count = 0, rest_ends_at = NULL, updated_at = NOW()
      WHERE id = ?"
   );
   $update->execute([$sessionId]);
@@ -967,25 +773,15 @@ function luzverde_build_status_message(?array $session, ?array $me): string {
   }
   if ($state === 'ACTIVE') {
     if ($me && $me['eliminated_at'] !== null) {
-      if (($me['eliminated_reason'] ?? '') === 'TOO_STILL') {
-        return 'DEMASIADO QUIETO';
-      }
       return 'Eliminado. Esperá la próxima ronda.';
     }
     if ($me && (int) ($me['armed'] ?? 0) !== 1) {
       return 'NO LISTO: habilitá sensores para participar.';
     }
-    $startedAtSec = strtotime((string) ($session['round_started_at'] ?? ''));
-    if ($startedAtSec !== false) {
-      $ageMs = ((((int) time()) - ((int) $startedAtSec)) * 1000);
-      if ($ageMs >= 0 && $ageMs <= 2200) {
-        return 'Calibrando… sostené el celu como vas a jugar';
-      }
-    }
     return 'EN JUEGO – QUEDATE QUIETO';
   }
   if ($state === 'REST') {
-    return sprintf('Ronda %d terminada. Próxima más difícil 😈', (int) ($session['round_no'] ?? 0));
+    return 'Descanso entre rondas.';
   }
   if ($state === 'FINISHED') {
     return 'Juego terminado.';
@@ -2100,9 +1896,6 @@ try {
         'round_no' => (int) $active['round_no'],
         'rest_ends_at' => $active['rest_ends_at'],
         'sensitivity_level' => (int) $active['sensitivity_level'],
-        'current_sensitivity' => luzverde_current_sensitivity($active),
-        'round_time_left_ms' => luzverde_round_time_left_ms($active),
-        'round_max_ms' => (int) ($active['round_max_ms'] ?? 25000),
         'base_points' => (int) $active['base_points'],
       ],
       'me' => [
@@ -2124,25 +1917,16 @@ try {
     if (!$active) {
       ok([
         'session' => null,
-        'me' => ['status' => 'alive', 'armed' => false, 'eliminated_order' => null, 'eliminated_round' => null, 'eliminated_reason' => null, 'danger_level' => 0],
+        'me' => ['status' => 'alive', 'armed' => false, 'eliminated_order' => null, 'eliminated_round' => null, 'eliminated_reason' => null],
         'message' => luzverde_build_status_message(null, null),
       ]);
     }
 
-    $pdo->beginTransaction();
-    luzverde_maybe_auto_end_round($pdo, (int) $active['id']);
-    $pdo->commit();
-
-    $active = luzverde_get_active_session($pdo);
     $meStmt = $pdo->prepare('SELECT * FROM luzverde_participants WHERE session_id = ? AND player_id = ? LIMIT 1');
     $meStmt->execute([(int) $active['id'], $playerId]);
     $me = $meStmt->fetch();
 
     $winnerName = luzverde_get_winner_name($pdo, (int) $active['id']);
-    $currentSensitivity = luzverde_current_sensitivity($active);
-    $roundLeftMs = luzverde_round_time_left_ms($active);
-    $dangerLevel = luzverde_player_danger_level($active, $me ?: null);
-    $threshold = $me ? luzverde_effective_threshold($active, $me) : luzverde_threshold_for_level($currentSensitivity);
 
     ok([
       'session' => [
@@ -2151,9 +1935,6 @@ try {
         'round_no' => (int) $active['round_no'],
         'rest_ends_at' => $active['rest_ends_at'],
         'sensitivity_level' => (int) $active['sensitivity_level'],
-        'current_sensitivity' => $currentSensitivity,
-        'round_time_left_ms' => $roundLeftMs,
-        'round_max_ms' => (int) ($active['round_max_ms'] ?? 25000),
         'base_points' => (int) $active['base_points'],
         'winner_name' => $winnerName,
       ],
@@ -2163,9 +1944,6 @@ try {
         'eliminated_order' => $me && $me['eliminated_order'] !== null ? (int) $me['eliminated_order'] : null,
         'eliminated_round' => $me && $me['eliminated_round'] !== null ? (int) $me['eliminated_round'] : null,
         'eliminated_reason' => $me['eliminated_reason'] ?? null,
-        'danger_level' => $dangerLevel,
-        'last_motion_score' => $me ? (float) ($me['last_motion_score'] ?? 0) : 0,
-        'threshold' => $threshold,
       ],
       'message' => luzverde_build_status_message($active, $me ?: null),
     ]);
@@ -2197,9 +1975,7 @@ try {
     $hbUpdate->execute([(int) $participant['id']]);
 
     $offlineEliminated = 0;
-    $autoRoundEnded = false;
     $pdo->beginTransaction();
-    $autoRoundEnded = luzverde_maybe_auto_end_round($pdo, $sessionId);
     $offlineEliminated = luzverde_prune_offline($pdo, $sessionId);
     $pdo->commit();
 
@@ -2212,7 +1988,6 @@ try {
       'session_state' => (string) $active['state'],
       'me_status' => ($me && $me['eliminated_at'] === null) ? 'alive' : 'eliminated',
       'offline_eliminated' => $offlineEliminated,
-      'auto_round_ended' => $autoRoundEnded,
     ]);
   }
 
@@ -2239,7 +2014,18 @@ try {
     $upMotion->execute([$motionScore, (int) $participant['id']]);
 
     if ($participant['eliminated_at'] !== null) {
-      ok(['ignored' => true, 'reason' => 'ALREADY_ELIMINATED']);
+      $pdo->beginTransaction();
+      $offlineEliminated = luzverde_prune_offline($pdo, $sessionId);
+      $pdo->commit();
+      ok(['ignored' => true, 'reason' => 'ALREADY_ELIMINATED', 'offline_eliminated' => $offlineEliminated]);
+    }
+
+    $threshold = luzverde_threshold_for_level((int) $active['sensitivity_level']);
+    if ($motionScore <= $threshold) {
+      $pdo->beginTransaction();
+      $offlineEliminated = luzverde_prune_offline($pdo, $sessionId);
+      $pdo->commit();
+      ok(['ignored' => true, 'threshold' => $threshold, 'offline_eliminated' => $offlineEliminated]);
     }
 
     $pdo->beginTransaction();
@@ -2258,29 +2044,6 @@ try {
     if (!$participantLocked || $participantLocked['eliminated_at'] !== null) {
       $pdo->rollBack();
       ok(['ignored' => true, 'reason' => 'ALREADY_ELIMINATED']);
-    }
-
-    luzverde_calibration_update($pdo, $sessionLocked, $participantLocked, $motionScore);
-
-    $threshold = luzverde_effective_threshold($sessionLocked, $participantLocked);
-    $stillnessResult = luzverde_update_participant_stillness($pdo, $sessionLocked, $participantLocked, $motionScore);
-
-    if (($stillnessResult['eliminated'] ?? false) === true) {
-      $shouldRest = luzverde_apply_round_threshold($pdo, $sessionLocked);
-      $pdo->commit();
-      ok([
-        'eliminated' => true,
-        'reason' => 'TOO_STILL',
-        'threshold' => $threshold,
-        'auto_rest' => $shouldRest,
-      ]);
-    }
-
-    if ($motionScore <= $threshold) {
-      $timeoutEnded = luzverde_maybe_auto_end_round($pdo, $sessionId);
-      $offlineEliminated = luzverde_prune_offline($pdo, $sessionId);
-      $pdo->commit();
-      ok(['ignored' => true, 'threshold' => $threshold, 'offline_eliminated' => $offlineEliminated, 'auto_rest' => $timeoutEnded]);
     }
 
     luzverde_eliminate_participant($pdo, $sessionId, (int) $participantLocked['id'], (int) $sessionLocked['round_no'], 'MOTION', $motionScore);
@@ -2309,6 +2072,7 @@ try {
 
     $shouldRest = luzverde_apply_round_threshold($pdo, $sessionLocked);
     $offlineEliminated = luzverde_prune_offline($pdo, $sessionId);
+
     $pdo->commit();
 
     ok([
@@ -2320,7 +2084,6 @@ try {
     ]);
   }
 
-
   if ($method === 'GET' && $action === 'admin_luzverde_state') {
     $active = luzverde_get_active_session($pdo);
     if (!$active) {
@@ -2329,7 +2092,6 @@ try {
 
     $sessionId = (int) $active['id'];
     $pdo->beginTransaction();
-    $autoRoundEnded = luzverde_maybe_auto_end_round($pdo, $sessionId);
     $offlineEliminated = luzverde_prune_offline($pdo, $sessionId);
     $pdo->commit();
 
@@ -2370,15 +2132,6 @@ try {
         'state' => (string) $active['state'],
         'round_no' => (int) $active['round_no'],
         'sensitivity_level' => (int) $active['sensitivity_level'],
-        'current_sensitivity' => luzverde_current_sensitivity($active),
-        'base_sensitivity' => (int) ($active['base_sensitivity'] ?? $active['sensitivity_level']),
-        'difficulty_step' => (int) ($active['difficulty_step'] ?? 2),
-        'difficulty_cap' => (int) ($active['difficulty_cap'] ?? 40),
-        'round_max_ms' => (int) ($active['round_max_ms'] ?? 25000),
-        'round_time_left_ms' => luzverde_round_time_left_ms($active),
-        'still_window_ms' => (int) ($active['still_window_ms'] ?? 6000),
-        'still_min' => (float) ($active['still_min'] ?? 0.015),
-        'still_grace_ms' => (int) ($active['still_grace_ms'] ?? 2000),
         'base_points' => (int) $active['base_points'],
         'rest_seconds' => (int) $active['rest_seconds'],
         'rest_ends_at' => $active['rest_ends_at'],
@@ -2388,7 +2141,6 @@ try {
       'participants' => $participants,
       'totals' => $counts,
       'offline_eliminated' => $offlineEliminated,
-      'auto_round_ended' => $autoRoundEnded,
       'eliminated_this_round' => $eliminatedThisRoundStmt->fetchAll(),
       'survivors' => $survivorsStmt->fetchAll(),
     ]);
@@ -2396,27 +2148,21 @@ try {
 
   if ($method === 'POST' && $action === 'admin_luzverde_update_config') {
     $b = body_json();
-    $baseSensitivity = max(1, min(40, (int) ($b['base_sensitivity'] ?? $b['sensitivity_level'] ?? 15)));
-    $difficultyStep = max(0, min(10, (int) ($b['difficulty_step'] ?? 2)));
-    $difficultyCap = max($baseSensitivity, min(40, (int) ($b['difficulty_cap'] ?? 40)));
-    $roundMaxMs = max(5000, min(120000, (int) ($b['round_max_ms'] ?? 25000)));
-    $stillWindowMs = max(2000, min(20000, (int) ($b['still_window_ms'] ?? 6000)));
-    $stillGraceMs = max(0, min(10000, (int) ($b['still_grace_ms'] ?? 2000)));
-    $stillMin = max(0.0001, min(1, (float) ($b['still_min'] ?? 0.015)));
+    $sensitivity = max(1, min(40, (int) ($b['sensitivity_level'] ?? 15)));
     $restSeconds = max(5, min(600, (int) ($b['rest_seconds'] ?? 60)));
     $basePoints = max(1, min(10000, (int) ($b['base_points'] ?? 10)));
 
     $active = luzverde_get_active_session($pdo);
     if (!$active) {
       $ins = $pdo->prepare(
-        "INSERT INTO luzverde_sessions (is_active, state, round_no, sensitivity_level, base_sensitivity, difficulty_step, difficulty_cap, round_max_ms, still_window_ms, still_grace_ms, still_min, base_points, rest_seconds, created_at, updated_at)
-         VALUES (1, 'WAITING', 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())"
+        "INSERT INTO luzverde_sessions (is_active, state, round_no, sensitivity_level, base_points, rest_seconds, created_at, updated_at)
+         VALUES (1, 'WAITING', 0, ?, ?, ?, NOW(), NOW())"
       );
-      $ins->execute([$baseSensitivity, $baseSensitivity, $difficultyStep, $difficultyCap, $roundMaxMs, $stillWindowMs, $stillGraceMs, $stillMin, $basePoints, $restSeconds]);
+      $ins->execute([$sensitivity, $basePoints, $restSeconds]);
       $active = luzverde_get_active_session($pdo);
     } else {
-      $up = $pdo->prepare('UPDATE luzverde_sessions SET sensitivity_level = ?, base_sensitivity = ?, difficulty_step = ?, difficulty_cap = ?, round_max_ms = ?, still_window_ms = ?, still_grace_ms = ?, still_min = ?, rest_seconds = ?, base_points = ?, updated_at = NOW() WHERE id = ?');
-      $up->execute([$baseSensitivity, $baseSensitivity, $difficultyStep, $difficultyCap, $roundMaxMs, $stillWindowMs, $stillGraceMs, $stillMin, $restSeconds, $basePoints, (int) $active['id']]);
+      $up = $pdo->prepare('UPDATE luzverde_sessions SET sensitivity_level = ?, rest_seconds = ?, base_points = ?, updated_at = NOW() WHERE id = ?');
+      $up->execute([$sensitivity, $restSeconds, $basePoints, (int) $active['id']]);
       $active = luzverde_get_active_session($pdo);
     }
 
@@ -2425,13 +2171,7 @@ try {
 
   if ($method === 'POST' && $action === 'admin_luzverde_reset_session') {
     $b = body_json();
-    $baseSensitivity = max(1, min(40, (int) ($b['base_sensitivity'] ?? $b['sensitivity_level'] ?? 15)));
-    $difficultyStep = max(0, min(10, (int) ($b['difficulty_step'] ?? 2)));
-    $difficultyCap = max($baseSensitivity, min(40, (int) ($b['difficulty_cap'] ?? 40)));
-    $roundMaxMs = max(5000, min(120000, (int) ($b['round_max_ms'] ?? 25000)));
-    $stillWindowMs = max(2000, min(20000, (int) ($b['still_window_ms'] ?? 6000)));
-    $stillGraceMs = max(0, min(10000, (int) ($b['still_grace_ms'] ?? 2000)));
-    $stillMin = max(0.0001, min(1, (float) ($b['still_min'] ?? 0.015)));
+    $sensitivity = max(1, min(40, (int) ($b['sensitivity_level'] ?? 15)));
     $restSeconds = max(5, min(600, (int) ($b['rest_seconds'] ?? 60)));
     $basePoints = max(1, min(10000, (int) ($b['base_points'] ?? 10)));
 
@@ -2440,10 +2180,10 @@ try {
 
     $ins = $pdo->prepare(
       "INSERT INTO luzverde_sessions
-      (is_active, state, round_no, sensitivity_level, base_sensitivity, difficulty_step, difficulty_cap, round_max_ms, still_window_ms, still_grace_ms, still_min, base_points, rest_seconds, rest_ends_at, round_alive_start, round_eliminated_count, created_at, updated_at)
-      VALUES (1, 'WAITING', 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, 0, NOW(), NOW())"
+      (is_active, state, round_no, sensitivity_level, base_points, rest_seconds, rest_ends_at, round_alive_start, round_eliminated_count, created_at, updated_at)
+      VALUES (1, 'WAITING', 0, ?, ?, ?, NULL, 0, 0, NOW(), NOW())"
     );
-    $ins->execute([$baseSensitivity, $baseSensitivity, $difficultyStep, $difficultyCap, $roundMaxMs, $stillWindowMs, $stillGraceMs, $stillMin, $basePoints, $restSeconds]);
+    $ins->execute([$sensitivity, $basePoints, $restSeconds]);
     $sessionId = (int) $pdo->lastInsertId();
     $pdo->commit();
 
@@ -2470,15 +2210,11 @@ try {
 
     $up = $pdo->prepare(
       "UPDATE luzverde_sessions
-       SET state = 'ACTIVE', round_no = round_no + 1, rest_ends_at = NULL, round_started_at = NOW(),
-           sensitivity_level = LEAST(base_sensitivity + (GREATEST(round_no + 1, 1) - 1) * difficulty_step, difficulty_cap),
+       SET state = 'ACTIVE', round_no = round_no + 1, rest_ends_at = NULL,
            round_alive_start = ?, round_eliminated_count = 0, updated_at = NOW()
        WHERE id = ?"
     );
     $up->execute([$aliveCount, (int) $active['id']]);
-
-    $resetCal = $pdo->prepare("UPDATE luzverde_participants SET still_since_at = NULL, calibration_samples = 0, calibration_sum = 0, calibration_sum_sq = 0, calibration_stddev = NULL, calibration_valid = 1, device_multiplier = 1 WHERE session_id = ? AND armed = 1 AND eliminated_at IS NULL");
-    $resetCal->execute([(int) $active['id']]);
 
     ok(['round_started' => true, 'alive_start' => $aliveCount]);
   }
@@ -2491,7 +2227,7 @@ try {
 
     $up = $pdo->prepare(
       "UPDATE luzverde_sessions
-       SET state = 'REST', round_started_at = NULL, rest_ends_at = DATE_ADD(NOW(), INTERVAL rest_seconds SECOND), updated_at = NOW()
+       SET state = 'REST', rest_ends_at = DATE_ADD(NOW(), INTERVAL rest_seconds SECOND), updated_at = NOW()
        WHERE id = ?"
     );
     $up->execute([(int) $active['id']]);
@@ -2553,7 +2289,7 @@ try {
       ];
     }
 
-    $up = $pdo->prepare("UPDATE luzverde_sessions SET state = 'FINISHED', round_started_at = NULL, is_active = 0, updated_at = NOW() WHERE id = ?");
+    $up = $pdo->prepare("UPDATE luzverde_sessions SET state = 'FINISHED', is_active = 0, updated_at = NOW() WHERE id = ?");
     $up->execute([$sessionId]);
 
     ok([
