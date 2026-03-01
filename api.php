@@ -1019,6 +1019,7 @@ try {
   fail('Database connection error', 500);
 }
 
+get_or_create_sumador_game($pdo);
 get_or_create_virus_game($pdo);
 get_or_create_qr_scanner_game($pdo);
 get_or_create_luzverde_game($pdo);

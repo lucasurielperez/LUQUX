@@ -328,6 +328,20 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   };
 
+
+  const sectionSelect = el('sectionSelect');
+  if (sectionSelect) {
+    sectionSelect.onchange = () => {
+      const id = sectionSelect.value;
+      if (!id) return;
+      const target = el(id);
+      if (target) {
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+      sectionSelect.value = '';
+    };
+  }
+
   el('qrType').onchange = () => toggleQrInputs();
   el('qrCreate').onclick = () => createQrs().catch((e) => { el('qrMsg').textContent = `Error: ${e.message}`; });
   toggleQrInputs();
