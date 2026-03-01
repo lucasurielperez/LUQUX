@@ -5,32 +5,132 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Admin</title>
   <style>
-    body{font-family:system-ui,Arial;margin:18px}
-    .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
-    input,button,select{padding:8px}
-    table{border-collapse:collapse;width:100%;margin-top:12px}
-    th,td{border:1px solid #ddd;padding:8px}
-    th{background:#f4f4f4;text-align:left}
-    .card{border:1px solid #ddd;border-radius:10px;padding:12px;margin:12px 0}
-    .muted{opacity:.7}
-    .top-nav{position:sticky;top:0;background:#fff;padding:10px 0;z-index:5}
-    .top-nav .row{gap:8px}
-    .nav-btn{display:inline-block;padding:8px 12px;border:1px solid #ddd;border-radius:999px;text-decoration:none;color:#222;background:#f8f8f8;font-weight:600}
+    :root {
+      --bg: #f3f5ff;
+      --card: #ffffff;
+      --text: #1f2440;
+      --muted: #5f6685;
+      --primary: #5e35b1;
+      --primary-soft: #ece4ff;
+      --border: #d9def7;
+    }
+
+    body {
+      font-family: system-ui, Arial, sans-serif;
+      margin: 0;
+      background: radial-gradient(circle at top, #fbf8ff 0%, var(--bg) 55%);
+      color: var(--text);
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 16px;
+    }
+
+    h2 {
+      margin: 12px 0 10px;
+      font-size: 1.7rem;
+    }
+
+    .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center }
+    input,button,select{padding:10px;border-radius:10px;border:1px solid var(--border);font:inherit}
+    button{background:var(--primary);color:#fff;border-color:var(--primary);cursor:pointer;font-weight:600}
+    button:hover{filter:brightness(1.05)}
+    table{border-collapse:collapse;width:100%;margin-top:12px;background:#fff}
+    th,td{border:1px solid #e7e9f7;padding:8px}
+    th{background:#f4f6ff;text-align:left}
+
+    .card {
+      border: 1px solid var(--border);
+      background: var(--card);
+      border-radius: 14px;
+      padding: 14px;
+      margin: 12px 0;
+      box-shadow: 0 8px 20px rgba(35, 25, 66, 0.06);
+      scroll-margin-top: 110px;
+    }
+
+    .muted{color:var(--muted);font-size:.95rem}
+
+    .top-nav {
+      position: sticky;
+      top: 0;
+      backdrop-filter: blur(10px);
+      background: rgba(248, 249, 255, 0.93);
+      border-bottom: 1px solid var(--border);
+      z-index: 20;
+      padding: 10px 0;
+      margin-bottom: 8px;
+    }
+
+    .top-nav .row { gap: 8px; }
+
+    .nav-btn{
+      display:inline-block;
+      padding:8px 12px;
+      border:1px solid var(--border);
+      border-radius:999px;
+      text-decoration:none;
+      color:var(--text);
+      background:#fff;
+      font-weight:700;
+      font-size:.92rem;
+    }
+
+    .nav-select {
+      min-width: 260px;
+      background: #fff;
+    }
+
+    .web-grid {
+      display:grid;
+      grid-template-columns:repeat(auto-fit,minmax(170px,1fr));
+      gap:8px;
+      margin-top:8px;
+    }
   </style>
 </head>
 <body>
   <div class="top-nav">
-    <div class="row">
-      <a class="nav-btn" href="../leaderboard.html" target="_blank" rel="noopener">Leaderboard</a>
-      <a class="nav-btn" href="../bracket.html" target="_blank" rel="noopener">Bracket</a>
-      <a class="nav-btn" href="admin.html">Juegos</a>
-      <a class="nav-btn" href="luzverde_host.html" target="_blank" rel="noopener">Luzverde Host</a>
+    <div class="container">
+      <div class="row">
+        <label for="sectionSelect"><strong>Ir a sección:</strong></label>
+        <select id="sectionSelect" class="nav-select">
+          <option value="">Seleccionar…</option>
+          <option value="tokenCard">Token y estado</option>
+          <option value="controlCard">Control global</option>
+          <option value="gamesCard">Juegos</option>
+          <option value="qrCard">QRs</option>
+          <option value="virusCard">Juego Virus</option>
+          <option value="eventsCard">Últimos eventos</option>
+          <option value="leaderboardCard">Leaderboard</option>
+          <option value="playersCard">Jugadores</option>
+          <option value="adjustCard">Ajuste puntos</option>
+          <option value="resetCard">Reset jugador</option>
+        </select>
+      </div>
+      <div class="web-grid">
+        <a class="nav-btn" href="../index.html" target="_blank" rel="noopener">Landing jugadores</a>
+        <a class="nav-btn" href="admin.html">Admin Juegos</a>
+        <a class="nav-btn" href="sumador.html" target="_blank" rel="noopener">Sumador</a>
+        <a class="nav-btn" href="virus.html" target="_blank" rel="noopener">Virus</a>
+        <a class="nav-btn" href="qr_scanner.html" target="_blank" rel="noopener">Lector QR</a>
+        <a class="nav-btn" href="../luzverde.html" target="_blank" rel="noopener">Luz Verde</a>
+        <a class="nav-btn" href="luzverde_host.html" target="_blank" rel="noopener">Luzverde Host</a>
+        <a class="nav-btn" href="../foto.html" target="_blank" rel="noopener">Foto</a>
+        <a class="nav-btn" href="../leaderboard.html" target="_blank" rel="noopener">Leaderboard</a>
+        <a class="nav-btn" href="../bracket.html" target="_blank" rel="noopener">Bracket</a>
+        <a class="nav-btn" href="errors.html" target="_blank" rel="noopener">Errores</a>
+        <a class="nav-btn" href="../qr.html" target="_blank" rel="noopener">Claim QR</a>
+      </div>
     </div>
   </div>
 
-  <h2>Admin (modo prueba)</h2>
+  <div class="container">
+    <h2>Admin (modo prueba)</h2>
 
-  <div class="card">
+  <div id="tokenCard" class="card">
     <div class="row">
       <input id="token" placeholder="Admin token" style="min-width:320px">
       <button id="saveToken">Guardar token</button>
@@ -54,7 +154,7 @@
   </div>
 
 
-  <div class="card">
+  <div id="qrCard" class="card">
     <h3>QRs</h3>
     <div class="row">
       <select id="qrType">
@@ -74,7 +174,7 @@
     </table>
   </div>
 
-  <div class="card">
+  <div id="gamesCard" class="card">
     <h3>Juegos</h3>
     <table id="games">
       <thead><tr><th>ID</th><th>Estado</th><th>Code</th><th>Nombre</th><th>Acción</th></tr></thead>
@@ -83,7 +183,7 @@
   </div>
 
 
-<div class="card">
+<div id="virusCard" class="card">
   <h3>Juego Virus</h3>
   <div class="row">
     <button id="virusToggle">Virus ON/OFF</button>
@@ -97,7 +197,7 @@
   </table>
 </div>
 
-<div class="card">
+<div id="controlCard" class="card">
   <h3>Control global</h3>
   <div class="row">
     <button id="btnScoringToggle">Cargando...</button>
@@ -105,7 +205,7 @@
   </div>
 </div>
 
-<div class="card">
+<div id="eventsCard" class="card">
   <h3>Últimos eventos (auditoría)</h3>
   <button id="loadEvents">Cargar últimos 50</button>
   <table id="events">
@@ -118,7 +218,7 @@
   </table>
 </div>
 
-<div class="card">
+<div id="resetCard" class="card">
   <h3>Reset TOTAL de jugador (testing)</h3>
   <div class="row">
     <input id="resetPid" placeholder="player_id" style="width:120px">
@@ -127,7 +227,7 @@
   </div>
 </div>
 
-  <div class="card">
+  <div id="leaderboardCard" class="card">
     <h3>Leaderboard</h3>
     <div class="row">
       <button id="loadLb">Cargar leaderboard</button>
@@ -139,7 +239,7 @@
     </table>
   </div>
 
-  <div class="card">
+  <div id="playersCard" class="card">
     <h3>Jugadores</h3>
     <button id="loadPlayers">Cargar jugadores</button>
     <table id="players">
@@ -148,7 +248,7 @@
     </table>
   </div>
 
-  <div class="card">
+  <div id="adjustCard" class="card">
     <h3>Ajuste puntos</h3>
     <div class="row">
       <input id="adjPid" placeholder="player_id" style="width:120px">
@@ -157,6 +257,7 @@
       <button id="adjGo">Aplicar</button>
       <span id="adjMsg" class="muted"></span>
     </div>
+  </div>
   </div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
