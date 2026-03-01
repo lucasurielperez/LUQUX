@@ -9,6 +9,7 @@
   const messageEl = document.getElementById('message');
   const sensorBtn = document.getElementById('sensorBtn');
   const offlineEl = document.getElementById('offline');
+  const dangerPulseEl = document.getElementById('dangerPulse');
 
   let player = null;
   let session = null;
@@ -32,6 +33,23 @@
     messageEl.textContent = msg || '';
   }
 
+
+  function renderDangerPulse(level) {
+    if (!dangerPulseEl) return;
+    const danger = Math.max(0, Math.min(1, Number(level || 0)));
+    if (danger < 0.55) {
+      dangerPulseEl.classList.remove('active');
+      dangerPulseEl.style.opacity = '0';
+      return;
+    }
+
+    const pulseOpacity = Math.min(0.9, 0.1 + danger * 0.55);
+    const duration = (1.3 - (danger * 0.8)).toFixed(2);
+    dangerPulseEl.style.setProperty('--pulse-op', String(pulseOpacity));
+    dangerPulseEl.style.animationDuration = `${duration}s`;
+    dangerPulseEl.style.opacity = String(Math.max(0.15, danger * 0.7));
+    dangerPulseEl.classList.add('active');
+  }
   async function api(action, method, body) {
     const res = await fetch(`${API}?action=${encodeURIComponent(action)}`, {
       method: method || 'GET',
@@ -125,7 +143,12 @@
       if (data.eliminated) {
         me.status = 'eliminated';
         sensorEnabled = false;
-        setScreen('red', 'ELIMINADO', 'Te moviste durante la ronda.');
+        renderDangerPulse(0);
+        if (data.reason === 'TOO_STILL') {
+          setScreen('red', 'DEMASIADO QUIETO', 'Trampa detectada (apoyaste el celu o no lo tenés en la mano).');
+        } else {
+          setScreen('red', 'ELIMINADO', 'Te moviste durante la ronda.');
+        }
       }
     } catch (_err) {
       offlineEl.classList.remove('hidden');
@@ -140,27 +163,41 @@
       offlineEl.classList.add('hidden');
 
       if (!session) {
+        renderDangerPulse(0);
         setScreen('neutral', 'Conectando…', data.message || 'Esperando sesión activa.');
         return;
       }
 
       if (session.state === 'ACTIVE' && me.status === 'alive') {
         if (!me.armed) {
+          renderDangerPulse(0);
           setScreen('neutral', 'NO LISTO', 'Habilitá sensores para participar.');
         } else {
-          setScreen('green', 'EN JUEGO – QUEDATE QUIETO', data.message || 'No te muevas.');
+          const isCalibrating = Number(session.round_max_ms || 0) > 0 && Number(session.round_time_left_ms || 0) > Number(session.round_max_ms || 0) - 2200;
+          renderDangerPulse(me.danger_level || 0);
+          if (isCalibrating) {
+            setScreen('green', 'Calibrando…', 'Calibrando… sostené el celu como vas a jugar');
+          } else {
+            setScreen('green', 'EN JUEGO – QUEDATE QUIETO', data.message || 'No te muevas.');
+          }
         }
       } else if (me.status === 'eliminated') {
-        const reason = me.eliminated_reason === 'SENSOR_OFFLINE' ? 'Perdiste por desconexión de sensores.' : 'Esperá a que termine la ronda.';
-        setScreen('red', 'ELIMINADO', reason);
+        renderDangerPulse(0);
+        let reason = 'Esperá a que termine la ronda.';
+        if (me.eliminated_reason === 'SENSOR_OFFLINE') reason = 'Perdiste por desconexión de sensores.';
+        if (me.eliminated_reason === 'TOO_STILL') reason = 'Trampa detectada (apoyaste el celu o no lo tenés en la mano).';
+        setScreen('red', me.eliminated_reason === 'TOO_STILL' ? 'DEMASIADO QUIETO' : 'ELIMINADO', reason);
       } else if (session.state === 'REST') {
+        renderDangerPulse(0);
         setScreen('neutral', 'Descanso', data.message || 'Esperando próxima ronda…');
       } else if (session.state === 'FINISHED') {
         sensorEnabled = false;
         motionBuffer = [];
+        renderDangerPulse(0);
         const winner = session.winner_name ? `Ganador: ${session.winner_name}` : 'Juego terminado';
         setScreen('neutral', 'Juego terminado', winner);
       } else {
+        renderDangerPulse(0);
         setScreen('neutral', me.armed ? 'Listo para jugar' : 'NO LISTO', data.message || 'Preparado.');
       }
     } catch (_err) {
