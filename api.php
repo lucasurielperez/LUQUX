@@ -486,6 +486,14 @@ function get_or_create_luzverde_game(PDO $pdo): array {
   ];
 }
 
+function ensure_core_games(PDO $pdo): void {
+  get_or_create_sumador_game($pdo);
+  get_or_create_qr_scanner_game($pdo);
+  get_or_create_luzverde_game($pdo);
+  get_or_create_luzroja_game($pdo);
+  get_or_create_virus_game($pdo);
+}
+
 function virus_secret(array $config): string {
   $secret = (string) ($config['virus_qr_secret'] ?? $config['admin_token'] ?? 'virus-secret');
   if (strlen($secret) < 16) {
@@ -1544,6 +1552,7 @@ try {
   }
 
   if ($method === 'GET' && $action === 'games') {
+    ensure_core_games($pdo);
     $stmt = $pdo->query('SELECT id, code, name, is_active, base_points FROM games ORDER BY id ASC');
     ok(['rows' => $stmt->fetchAll()]);
   }
@@ -1986,6 +1995,7 @@ try {
   }
 
   if ($method === 'POST' && $action === 'admin_qr_create') {
+    ensure_core_games($pdo);
     $b = body_json();
     $qrType = (string) ($b['qr_type'] ?? '');
     if ($qrType !== 'secret' && $qrType !== 'game') {
