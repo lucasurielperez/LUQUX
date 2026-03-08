@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Resumen PDF con IA local</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+  </head>
+  <body>
+    <main class="container">
+      <h1>Resumen PDF con IA local</h1>
+      <p>
+        Sube un PDF y genera un resumen corto usando un modelo que corre localmente
+        (por ejemplo, Ollama).
+      </p>
+
+      <form id="summarize-form">
+        <label for="pdf">Archivo PDF</label>
+        <input id="pdf" name="pdf" type="file" accept="application/pdf" required />
+
+        <label for="model">Modelo local</label>
+        <input id="model" name="model" type="text" value="{{ default_model }}" required />
+
+        <button type="submit">Generar resumen</button>
+      </form>
+
+      <section>
+        <h2>Resultado</h2>
+        <pre id="result">Aún no hay resumen.</pre>
+      </section>
+    </main>
+
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+  </body>
+</html>
