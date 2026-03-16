@@ -14,6 +14,7 @@
     <nav>
         <a href="dashboard.php">Dashboard</a>
         <a href="projects.php">Proyectos</a>
+        <a href="recurring_tasks.php">Rutinas</a>
         <a href="project_create.php" class="btn-primary">+ Nuevo</a>
     </nav>
 </header>

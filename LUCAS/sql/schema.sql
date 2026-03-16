@@ -40,6 +40,23 @@ CREATE TABLE IF NOT EXISTS tasks (
     INDEX idx_tasks_prioridad (prioridad)
 );
 
+
+CREATE TABLE IF NOT EXISTS recurring_tasks (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    titulo VARCHAR(160) NOT NULL,
+    descripcion TEXT NULL,
+    frecuencia ENUM('diaria','semanal','mensual','anual') NOT NULL DEFAULT 'diaria',
+    estado ENUM('pendiente','en_progreso','completada') NOT NULL DEFAULT 'pendiente',
+    prioridad ENUM('alta','media','baja') NOT NULL DEFAULT 'alta',
+    ultima_completada DATETIME NULL,
+    proxima_aparicion DATETIME NULL,
+    fecha_creacion DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    fecha_actualizacion DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_recurring_tasks_estado (estado),
+    INDEX idx_recurring_tasks_proxima (proxima_aparicion),
+    INDEX idx_recurring_tasks_prioridad (prioridad)
+);
+
 CREATE INDEX idx_projects_estado ON projects(estado);
 CREATE INDEX idx_projects_salud ON projects(salud);
 CREATE INDEX idx_projects_prioridad_real ON projects(prioridad_real);

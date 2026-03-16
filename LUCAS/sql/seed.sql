@@ -18,3 +18,9 @@ INSERT INTO tasks (proyecto_id, titulo, descripcion, estado, prioridad, fecha_li
 (3, 'Grabar lote de 3 videos', NULL, 'pendiente', 'alta', NULL, 2),
 (4, 'Conectar datos bancarios', NULL, 'hecha', 'media', '2025-01-05', 1),
 (4, 'Crear panel de KPIs', NULL, 'pendiente', 'alta', '2025-01-15', 2);
+
+
+INSERT INTO recurring_tasks (titulo, descripcion, frecuencia, estado, prioridad) VALUES
+('Chequear mails', 'Inbox general y respuestas urgentes.', 'diaria', 'pendiente', 'alta'),
+('Revisión semanal de objetivos', 'Mirar el avance de todos los proyectos.', 'semanal', 'pendiente', 'alta'),
+('Cierre mensual administrativo', 'Facturación y reportes del mes.', 'mensual', 'pendiente', 'media');
