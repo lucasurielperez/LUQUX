@@ -2,6 +2,7 @@
 require_once __DIR__ . '/../includes/functions.php';
 require_once __DIR__ . '/../includes/project_functions.php';
 require_once __DIR__ . '/../includes/task_functions.php';
+require_once __DIR__ . '/../includes/recurring_task_functions.php';
 
 refresh_all_projects();
 $projects = fetch_projects();
@@ -11,6 +12,8 @@ $attention = [];
 $good = [];
 $totalPendingTasks = 0;
 $globalProgress = 0;
+
+$recurringTasks = fetch_recurring_tasks(true);
 
 foreach ($projects as $p) {
     $byEstado[$p['estado']]++;
@@ -23,6 +26,23 @@ $globalProgress = $total ? (int) round($globalProgress / $total) : 0;
 $title = 'Dashboard';
 include __DIR__ . '/../includes/header.php';
 ?>
+<section class="card recurring-highlight">
+    <div class="card-head">
+        <h3>Recurrentes prioritarias</h3>
+        <a class="btn-primary" href="recurring_tasks.php">Administrar</a>
+    </div>
+    <?php if (!$recurringTasks): ?>
+        <p>No hay rutinas activas en este momento.</p>
+    <?php else: ?>
+        <?php foreach (array_slice($recurringTasks, 0, 4) as $r): ?>
+            <a class="list-item recurring-item recurring-<?= e($r['prioridad']) ?>" href="recurring_tasks.php">
+                <strong><?= e($r['titulo']) ?></strong>
+                <span class="badge"><?= e($r['frecuencia']) ?></span>
+                <span class="badge"><?= e($r['estado']) ?></span>
+            </a>
+        <?php endforeach; ?>
+    <?php endif; ?>
+</section>
 <section class="kpis">
     <article class="card"><h3>Total proyectos</h3><p><?= $total ?></p></article>
     <article class="card"><h3>Tareas pendientes</h3><p><?= $totalPendingTasks ?></p></article>
