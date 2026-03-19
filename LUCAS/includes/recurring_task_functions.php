@@ -96,23 +96,29 @@ function complete_recurring_task(int $id): void
     $task = fetch_recurring_task($id);
     if (!$task) return;
 
-    $next = calculate_next_recurring_date((string) $task['frecuencia']);
+    $now = new DateTimeImmutable('now');
+    $next = calculate_next_recurring_date((string) $task['frecuencia'], $now);
     db()->prepare("UPDATE recurring_tasks
-        SET estado='completada', ultima_completada=NOW(), proxima_aparicion=:nextDate
+        SET estado='completada', ultima_completada=:completedAt, proxima_aparicion=:nextDate
         WHERE id=:id")
-        ->execute(['nextDate' => $next->format('Y-m-d H:i:s'), 'id' => $id]);
+        ->execute([
+            'completedAt' => $now->format('Y-m-d H:i:s'),
+            'nextDate' => $next->format('Y-m-d H:i:s'),
+            'id' => $id,
+        ]);
 }
 
-function calculate_next_recurring_date(string $frequency): DateTimeImmutable
+function calculate_next_recurring_date(string $frequency, ?DateTimeImmutable $base = null): DateTimeImmutable
 {
-    $base = new DateTimeImmutable('now');
+    $base ??= new DateTimeImmutable('now');
+    $startOfDay = $base->setTime(0, 0, 0);
 
     return match ($frequency) {
-        'diaria' => $base->modify('+1 day'),
-        'semanal' => $base->modify('+1 week'),
-        'mensual' => $base->modify('+1 month'),
-        'anual' => $base->modify('+1 year'),
-        default => $base->modify('+1 day'),
+        'diaria' => $startOfDay->modify('+1 day'),
+        'semanal' => $startOfDay->modify('+1 week'),
+        'mensual' => $startOfDay->modify('+1 month'),
+        'anual' => $startOfDay->modify('+1 year'),
+        default => $startOfDay->modify('+1 day'),
     };
 }
 
