@@ -46,10 +46,9 @@ function update_task(int $id, array $data): array
 {
     [$ok, $errors, $clean] = validate_task_data($data);
     if (!$ok) return [false, $errors];
-    $clean['id'] = $id;
 
     db()->prepare('UPDATE tasks SET titulo=:titulo, descripcion=:descripcion, estado=:estado, prioridad=:prioridad,
-        fecha_limite=:fecha_limite, orden_manual=:orden_manual WHERE id=:id')->execute($clean);
+        fecha_limite=:fecha_limite, orden_manual=:orden_manual WHERE id=:id')->execute(task_update_payload($id, $clean));
 
     recalculate_project_metrics((int) $clean['proyecto_id']);
     return [true, []];
@@ -92,4 +91,17 @@ function validate_task_data(array $data): array
         'fecha_limite' => $fechaLimite ?: null,
         'orden_manual' => $orden === '' ? null : (int) $orden,
     ]];
+}
+
+function task_update_payload(int $id, array $clean): array
+{
+    return [
+        'id' => $id,
+        'titulo' => $clean['titulo'],
+        'descripcion' => $clean['descripcion'],
+        'estado' => $clean['estado'],
+        'prioridad' => $clean['prioridad'],
+        'fecha_limite' => $clean['fecha_limite'],
+        'orden_manual' => $clean['orden_manual'],
+    ];
 }
