@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/functions.php';
+require_once __DIR__ . '/auth.php';
 
 function recurring_task_statuses(): array
 {
@@ -22,28 +23,31 @@ function recurring_task_priorities(): array
 
 function refresh_recurring_tasks(): void
 {
-    db()->exec("UPDATE recurring_tasks
+    $stmt = db()->prepare("UPDATE recurring_tasks
         SET estado='pendiente'
-        WHERE estado='completada' AND proxima_aparicion IS NOT NULL AND proxima_aparicion <= NOW()");
+        WHERE estado='completada' AND proxima_aparicion IS NOT NULL AND proxima_aparicion <= NOW() AND user_id = :user_id");
+    $stmt->execute(['user_id' => current_user_id()]);
 }
 
 function fetch_recurring_tasks(bool $onlyActive = false): array
 {
     refresh_recurring_tasks();
-    $sql = 'SELECT * FROM recurring_tasks';
+    $sql = 'SELECT * FROM recurring_tasks WHERE user_id = :user_id';
     if ($onlyActive) {
-        $sql .= " WHERE estado != 'completada'";
+        $sql .= " AND estado != 'completada'";
     }
     $sql .= " ORDER BY prioridad='alta' DESC, prioridad='media' DESC, fecha_actualizacion DESC";
 
-    return db()->query($sql)->fetchAll();
+    $stmt = db()->prepare($sql);
+    $stmt->execute(['user_id' => current_user_id()]);
+    return $stmt->fetchAll();
 }
 
 function fetch_recurring_task(int $id): ?array
 {
     refresh_recurring_tasks();
-    $stmt = db()->prepare('SELECT * FROM recurring_tasks WHERE id=:id');
-    $stmt->execute(['id' => $id]);
+    $stmt = db()->prepare('SELECT * FROM recurring_tasks WHERE id = :id AND user_id = :user_id');
+    $stmt->execute(['id' => $id, 'user_id' => current_user_id()]);
     $row = $stmt->fetch();
     return $row ?: null;
 }
@@ -53,8 +57,8 @@ function create_recurring_task(array $data): array
     [$ok, $errors, $clean] = validate_recurring_task_data($data);
     if (!$ok) return [false, $errors];
 
-    db()->prepare('INSERT INTO recurring_tasks (titulo, descripcion, frecuencia, estado, prioridad)
-        VALUES (:titulo, :descripcion, :frecuencia, :estado, :prioridad)')->execute($clean);
+    db()->prepare('INSERT INTO recurring_tasks (user_id, titulo, descripcion, frecuencia, estado, prioridad)
+        VALUES (:user_id, :titulo, :descripcion, :frecuencia, :estado, :prioridad)')->execute($clean + ['user_id' => current_user_id()]);
 
     return [true, []];
 }
@@ -65,9 +69,10 @@ function update_recurring_task(int $id, array $data): array
     if (!$ok) return [false, $errors];
 
     $clean['id'] = $id;
+    $clean['user_id'] = current_user_id();
     db()->prepare('UPDATE recurring_tasks
         SET titulo=:titulo, descripcion=:descripcion, frecuencia=:frecuencia, estado=:estado, prioridad=:prioridad
-        WHERE id=:id')->execute($clean);
+        WHERE id=:id AND user_id=:user_id')->execute($clean);
 
     if ($clean['estado'] === 'completada') {
         complete_recurring_task($id);
@@ -86,8 +91,8 @@ function set_recurring_task_state(int $id, string $status): bool
         return true;
     }
 
-    $stmt = db()->prepare('UPDATE recurring_tasks SET estado=:estado, proxima_aparicion=NULL WHERE id=:id');
-    $stmt->execute(['estado' => $status, 'id' => $id]);
+    $stmt = db()->prepare('UPDATE recurring_tasks SET estado=:estado, proxima_aparicion=NULL WHERE id=:id AND user_id=:user_id');
+    $stmt->execute(['estado' => $status, 'id' => $id, 'user_id' => current_user_id()]);
     return $stmt->rowCount() > 0;
 }
 
@@ -100,11 +105,12 @@ function complete_recurring_task(int $id): void
     $next = calculate_next_recurring_date((string) $task['frecuencia'], $now);
     db()->prepare("UPDATE recurring_tasks
         SET estado='completada', ultima_completada=:completedAt, proxima_aparicion=:nextDate
-        WHERE id=:id")
+        WHERE id=:id AND user_id=:user_id")
         ->execute([
             'completedAt' => $now->format('Y-m-d H:i:s'),
             'nextDate' => $next->format('Y-m-d H:i:s'),
             'id' => $id,
+            'user_id' => current_user_id(),
         ]);
 }
 
@@ -124,7 +130,7 @@ function calculate_next_recurring_date(string $frequency, ?DateTimeImmutable $ba
 
 function delete_recurring_task(int $id): void
 {
-    db()->prepare('DELETE FROM recurring_tasks WHERE id=:id')->execute(['id' => $id]);
+    db()->prepare('DELETE FROM recurring_tasks WHERE id=:id AND user_id=:user_id')->execute(['id' => $id, 'user_id' => current_user_id()]);
 }
 
 function validate_recurring_task_data(array $data): array

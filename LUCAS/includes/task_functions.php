@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/project_functions.php';
+require_once __DIR__ . '/auth.php';
 
 function task_statuses(): array
 {
@@ -17,15 +18,15 @@ function task_priorities(): array
 
 function fetch_tasks_by_project(int $projectId): array
 {
-    $stmt = db()->prepare('SELECT * FROM tasks WHERE proyecto_id=:id ORDER BY orden_manual IS NULL, orden_manual ASC, fecha_creacion DESC');
-    $stmt->execute(['id' => $projectId]);
+    $stmt = db()->prepare('SELECT * FROM tasks WHERE proyecto_id = :id AND user_id = :user_id ORDER BY orden_manual IS NULL, orden_manual ASC, fecha_creacion DESC');
+    $stmt->execute(['id' => $projectId, 'user_id' => current_user_id()]);
     return $stmt->fetchAll();
 }
 
 function fetch_task(int $id): ?array
 {
-    $stmt = db()->prepare('SELECT * FROM tasks WHERE id=:id');
-    $stmt->execute(['id' => $id]);
+    $stmt = db()->prepare('SELECT * FROM tasks WHERE id = :id AND user_id = :user_id');
+    $stmt->execute(['id' => $id, 'user_id' => current_user_id()]);
     $task = $stmt->fetch();
     return $task ?: null;
 }
@@ -35,8 +36,8 @@ function create_task(array $data): array
     [$ok, $errors, $clean] = validate_task_data($data);
     if (!$ok) return [false, $errors];
 
-    db()->prepare('INSERT INTO tasks (proyecto_id, titulo, descripcion, estado, prioridad, fecha_limite, orden_manual)
-        VALUES (:proyecto_id, :titulo, :descripcion, :estado, :prioridad, :fecha_limite, :orden_manual)')->execute($clean);
+    db()->prepare('INSERT INTO tasks (proyecto_id, user_id, titulo, descripcion, estado, prioridad, fecha_limite, orden_manual)
+        VALUES (:proyecto_id, :user_id, :titulo, :descripcion, :estado, :prioridad, :fecha_limite, :orden_manual)')->execute($clean + ['user_id' => current_user_id()]);
 
     recalculate_project_metrics((int) $clean['proyecto_id']);
     return [true, []];
@@ -48,7 +49,7 @@ function update_task(int $id, array $data): array
     if (!$ok) return [false, $errors];
 
     db()->prepare('UPDATE tasks SET titulo=:titulo, descripcion=:descripcion, estado=:estado, prioridad=:prioridad,
-        fecha_limite=:fecha_limite, orden_manual=:orden_manual WHERE id=:id')->execute(task_update_payload($id, $clean));
+        fecha_limite=:fecha_limite, orden_manual=:orden_manual WHERE id=:id AND user_id=:user_id')->execute(task_update_payload($id, $clean));
 
     recalculate_project_metrics((int) $clean['proyecto_id']);
     return [true, []];
@@ -58,7 +59,7 @@ function delete_task(int $id): void
 {
     $task = fetch_task($id);
     if (!$task) return;
-    db()->prepare('DELETE FROM tasks WHERE id=:id')->execute(['id' => $id]);
+    db()->prepare('DELETE FROM tasks WHERE id = :id AND user_id = :user_id')->execute(['id' => $id, 'user_id' => current_user_id()]);
     recalculate_project_metrics((int) $task['proyecto_id']);
 }
 
@@ -74,6 +75,7 @@ function validate_task_data(array $data): array
     $orden = trim((string) ($data['orden_manual'] ?? ''));
 
     if ($proyectoId <= 0) $errors[] = 'Proyecto inválido.';
+    if ($proyectoId > 0 && current_user_id() > 0 && !fetch_project($proyectoId)) $errors[] = 'Proyecto inválido.';
     if ($titulo === '') $errors[] = 'El título de la tarea es obligatorio.';
     if (!in_array($estado, task_statuses(), true)) $errors[] = 'Estado de tarea inválido.';
     if (!in_array($prioridad, task_priorities(), true)) $errors[] = 'Prioridad de tarea inválida.';
@@ -97,6 +99,7 @@ function task_update_payload(int $id, array $clean): array
 {
     return [
         'id' => $id,
+        'user_id' => current_user_id(),
         'titulo' => $clean['titulo'],
         'descripcion' => $clean['descripcion'],
         'estado' => $clean['estado'],

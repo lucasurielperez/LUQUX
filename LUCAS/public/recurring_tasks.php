@@ -1,6 +1,8 @@
 <?php
 require_once __DIR__ . '/../includes/functions.php';
+require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/recurring_task_functions.php';
+require_login();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['task_id'], $_POST['estado'])) {
     $ok = set_recurring_task_state((int) $_POST['task_id'], (string) $_POST['estado']);

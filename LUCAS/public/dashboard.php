@@ -1,8 +1,10 @@
 <?php
 require_once __DIR__ . '/../includes/functions.php';
+require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/project_functions.php';
 require_once __DIR__ . '/../includes/task_functions.php';
 require_once __DIR__ . '/../includes/recurring_task_functions.php';
+require_login();
 
 refresh_all_projects();
 $projects = fetch_projects();
