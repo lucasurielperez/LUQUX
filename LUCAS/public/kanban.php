@@ -1,7 +1,9 @@
 <?php
 require_once __DIR__ . '/../includes/functions.php';
+require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/task_functions.php';
 require_once __DIR__ . '/../includes/project_functions.php';
+require_login();
 
 $projectId = (int) ($_GET['proyecto_id'] ?? $_POST['proyecto_id'] ?? 0);
 $project = fetch_project($projectId);
