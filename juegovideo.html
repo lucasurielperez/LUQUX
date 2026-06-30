@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dance VFX App</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #050505;
+            overflow: hidden;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            color: white;
+            user-select: none;
+        }
+        #container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+        video {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            opacity: 0; /* Totalmente oculto */
+            pointer-events: none;
+        }
+        canvas {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1); /* Modo espejo */
+        }
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 1.2rem;
+            background: rgba(0,0,0,0.85);
+            padding: 15px 30px;
+            border-radius: 30px;
+            border: 1px solid #333;
+            pointer-events: none;
+            z-index: 10;
+            letter-spacing: 1px;
+        }
+        /* Botonera inferior estilo App */
+        #menu {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 8px;
+            background: rgba(0, 0, 0, 0.6);
+            padding: 8px;
+            border-radius: 40px;
+            backdrop-filter: blur(10px);
+            z-index: 20;
+            max-width: 90vw;
+            overflow-x: auto;
+            scrollbar-width: none;
+        }
+        #menu::-webkit-scrollbar { display: none; }
+        .btn-fx {
+            background: rgba(255,255,255,0.1);
+            border: none;
+            color: #aaa;
+            padding: 10px 16px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: bold;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: all 0.3s ease;
+        }
+        .btn-fx.active {
+            background: #00ffcc;
+            color: #000;
+            box-shadow: 0 0 15px #00ffcc;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="container">
+        <div id="loading">Iniciando IA y Cámara...</div>
+        <video id="webcam" autoplay playsinline></video>
+        <canvas id="output_canvas"></canvas>
+        
+        <div id="menu">
+            <button class="btn-fx active" onclick="changeFX(1)">1. Monigote</button>
+            <button class="btn-fx" onclick="changeFX(2)">2. Estela Ghost</button>
+            <button class="btn-fx" onclick="changeFX(3)">3. Aura Partículas</button>
+            <button class="btn-fx" onclick="changeFX(4)">4. Fondo Ondas</button>
+            <button class="btn-fx" onclick="changeFX(5)">5. Geometría</button>
+        </div>
+    </div>
+
+    <script>
+        const videoElement = document.getElementById('webcam');
+        const canvasElement = document.getElementById('output_canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        const loadingElement = document.getElementById('loading');
+        
+        let currentFX = 1;
+        let particles = [];
+        let waveRadius = 0;
+        let waveColor = '#1a0033';
+        let targetWaveColor = '#1a0033';
+
+        // Definición de conexiones para el monigote (pares de índices de MediaPipe)
+        const connections = [
+            [11, 12], [11, 13], [13, 15], [12, 14], [14, 16], // Tren superior
+            [11, 23], [12, 24], [23, 24], // Torso
+            [23, 25], [25, 27], [24, 26], [26, 28] // Tren inferior
+        ];
+
+        function resizeCanvas() {
+            canvasElement.width = window.innerWidth;
+            canvasElement.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        function changeFX(fxNum) {
+            currentFX = fxNum;
+            document.querySelectorAll('.btn-fx').forEach((btn, idx) => {
+                btn.classList.toggle('active', idx + 1 === fxNum);
+            });
+            // Limpieza rápida al cambiar de efecto
+            if(fxNum !== 2) canvasCtx.clearRect(0,0, canvasElement.width, canvasElement.height);
+        }
+
+        function onResults(results) {
+            if (loadingElement) loadingElement.style.display = 'none';
+
+            canvasCtx.save();
+            
+            // --- MANEJO DE FONDOS ---
+            if (currentFX === 2) {
+                // Efecto Estela: Pintamos un fondo negro semi-transparente para arrastrar el dibujo anterior
+                canvasCtx.fillStyle = 'rgba(5, 5, 5, 0.09)';
+                canvasCtx.fillRect(0, 0, canvasElement.width, canvasElement.height);
+            } else if (currentFX === 4) {
+                // Fondo Reactivo Dinámico
+                canvasCtx.fillStyle = waveColor;
+                canvasCtx.fillRect(0, 0, canvasElement.width, canvasElement.height);
+                
+                // Transición suave de color de fondo de vuelta al oscuro
+                if (waveColor !== '#050505') {
+                    canvasCtx.fillStyle = 'rgba(5,5,5,0.1)';
+                    canvasCtx.fillRect(0, 0, canvasElement.width, canvasElement.height);
+                }
+            } else {
+                // Fondo limpio estándar para los demás efectos
+                canvasCtx.fillStyle = '#050505';
+                canvasCtx.fillRect(0, 0, canvasElement.width, canvasElement.height);
+            }
+
+            // --- PROCESAMIENTO DE IA (PUNTOS DEL CUERPO) ---
+            if (results.poseLandmarks) {
+                const landmarks = results.poseLandmarks;
+                const width = canvasElement.width;
+                const height = canvasElement.height;
+
+                // Mapear coordenadas clave
+                const getPt = (idx) => ({ x: landmarks[idx].x * width, y: landmarks[idx].y * height });
+
+                switch (currentFX) {
+                    
+                    case 1: // 1. MONIGOTE DE NEÓN
+                        canvasCtx.lineWidth = 6;
+                        canvasCtx.strokeStyle = '#00ffcc';
+                        canvasCtx.shadowBlur = 15;
+                        canvasCtx.shadowColor = '#00ffcc';
+
+                        connections.forEach(([p1, p2]) => {
+                            const pt1 = getPt(p1);
+                            const pt2 = getPt(p2);
+                            canvasCtx.beginPath();
+                            canvasCtx.moveTo(pt1.x, pt1.y);
+                            canvasCtx.lineTo(pt2.x, pt2.y);
+                            canvasCtx.stroke();
+                        });
+
+                        // Cabeza
+                        const nariz = getPt(0);
+                        canvasCtx.beginPath();
+                        canvasCtx.arc(nariz.x, nariz.y - 20, 25, 0, 2 * Math.PI);
+                        canvasCtx.stroke();
+                        break;
+
+                    case 2: // 2. SILUETA DE ESTELA GHOST
+                        canvasCtx.fillStyle = '#ff0055';
+                        canvasCtx.shadowBlur = 20;
+                        canvasCtx.shadowColor = '#ff0055';
+
+                        // Dibujamos un polígono relleno que simule la masa corporal básica
+                        canvasCtx.beginPath();
+                        const ordenSilueta = [11, 13, 15, 13, 11, 23, 25, 27, 25, 23, 24, 26, 28, 26, 24, 12, 14, 16, 14, 12];
+                        ordenSilueta.forEach((idx, i) => {
+                            const pt = getPt(idx);
+                            if (i === 0) canvasCtx.moveTo(pt.x, pt.y);
+                            else canvasCtx.lineTo(pt.x, pt.y);
+                        });
+                        canvasCtx.closePath();
+                        canvasCtx.fill();
+                        break;
+
+                    case 3: // 3. AURA DE PARTÍCULAS
+                        // Generar partículas en manos (15, 16) y pies (27, 28)
+                        [15, 16, 27, 28].forEach(idx => {
+                            const pt = getPt(idx);
+                            if(Math.random() > 0.3) { // Generación fluida
+                                particles.push({
+                                    x: pt.x,
+                                    y: pt.y,
+                                    vx: (Math.random() - 0.5) * 6,
+                                    vy: (Math.random() - 0.5) * 6 - 2, // Tienden a subir
+                                    alpha: 1,
+                                    color: `hsl(${Math.random() * 60 + 260}, 100%, 60%)` // Tonos violetas/glowing
+                                });
+                            }
+                        });
+
+                        // Actualizar y dibujar partículas
+                        canvasCtx.shadowBlur = 10;
+                        particles.forEach((p, index) => {
+                            p.x += p.vx;
+                            p.y += p.vy;
+                            p.alpha -= 0.02; // Desvanecimiento
+                            
+                            if (p.alpha <= 0) {
+                                particles.splice(index, 1);
+                            } else {
+                                canvasCtx.fillStyle = p.color;
+                                canvasCtx.shadowColor = p.color;
+                                canvasCtx.globalAlpha = p.alpha;
+                                canvasCtx.beginPath();
+                                canvasCtx.arc(p.x, p.y, 6, 0, 2 * Math.PI);
+                                canvasCtx.fill();
+                            }
+                        });
+                        canvasCtx.globalAlpha = 1.0; // Reset alpha
+                        break;
+
+                    case 4: // 4. FONDO REACTIVO DE ONDAS
+                        const mIzq = getPt(15);
+                        const mDer = getPt(16);
+                        // Calculamos la distancia entre manos
+                        const distManos = Math.hypot(mDer.x - mIzq.x, mDer.y - mIzq.y);
+
+                        // Si la distancia es muy grande (brazos abiertos), disparamos la onda
+                        if (distManos > width * 0.45 && waveRadius === 0) {
+                            waveRadius = 1;
+                            // Elegir un color flúor random para el golpe de fondo
+                            const colors = ['#1a0033', '#002233', '#003311', '#330011'];
+                            waveColor = colors[Math.floor(Math.random() * colors.length)];
+                        }
+
+                        // Animación de la onda expansiva central
+                        if (waveRadius > 0) {
+                            waveRadius += 25;
+                            canvasCtx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+                            canvasCtx.lineWidth = 4;
+                            canvasCtx.shadowBlur = 30;
+                            canvasCtx.shadowColor = '#fff';
+                            canvasCtx.beginPath();
+                            canvasCtx.arc(width / 2, height / 2, waveRadius, 0, 2 * Math.PI);
+                            canvasCtx.stroke();
+
+                            if (waveRadius > width) waveRadius = 0; // Termina la onda
+                        }
+
+                        // Dibujamos un monigote minimalista blanco para saber dónde está el bailarín
+                        canvasCtx.strokeStyle = '#ffffff';
+                        canvasCtx.lineWidth = 3;
+                        canvasCtx.shadowBlur = 0;
+                        connections.forEach(([p1, p2]) => {
+                            const pt1 = getPt(p1); const pt2 = getPt(p2);
+                            canvasCtx.beginPath(); canvasCtx.moveTo(pt1.x, pt1.y); canvasCtx.lineTo(pt2.x, pt2.y); canvasCtx.stroke();
+                        });
+                        break;
+
+                    case 5: // 5. GEOMETRÍA SAGRADA
+                        canvasCtx.shadowBlur = 0;
+                        // Definimos tríos de puntos para armar polígonos rellenos translucidos
+                        const triangulos = [
+                            [11, 12, 23], [12, 23, 24], // Centro Torso
+                            [11, 13, 15], [12, 14, 16], // Brazos completos
+                            [23, 25, 27], [24, 26, 28], // Piernas completas
+                            [11, 24, 16], [12, 23, 15]  // Cruces abstractos dinámicos
+                        ];
+
+                        triangulos.forEach((t, i) => {
+                            const p1 = getPt(t[0]);
+                            const p2 = getPt(t[1]);
+                            const p3 = getPt(t[2]);
+
+                            canvasCtx.fillStyle = `rgba(${i * 30}, 100, 255, 0.25)`;
+                            canvasCtx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+                            canvasCtx.lineWidth = 1;
+
+                            canvasCtx.beginPath();
+                            canvasCtx.moveTo(p1.x, p1.y);
+                            canvasCtx.lineTo(p2.x, p2.y);
+                            canvasCtx.lineTo(p3.x, p3.y);
+                            canvasCtx.closePath();
+                            canvasCtx.fill();
+                            canvasCtx.stroke();
+                        });
+                        break;
+                }
+            }
+            canvasCtx.restore();
+        }
+
+        // --- INICIALIZACIÓN DE MEDIAPIPE Y CÁMARA ---
+        const pose = new Pose({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
+        });
+
+        pose.setOptions({
+            modelComplexity: 1, // Balance óptimo para navegadores móviles
+            smoothLandmarks: true,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+        });
+
+        pose.onResults(onResults);
+
+        const camera = new Camera(videoElement, {
+            onFrame: async () => {
+                await pose.send({image: videoElement});
+            },
+            width: 480,
+            height: 360 // Resolución optimizada para procesamiento veloz en smartphone
+        });
+        
+        camera.start().catch(err => {
+            alert("Error crítico de cámara. Asegurate de otorgar permisos y navegar mediante HTTPS.");
+            console.error(err);
+        });
+    </script>
+</body>
+</html>
